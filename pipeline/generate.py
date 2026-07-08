@@ -18,8 +18,12 @@ from pipeline.skeleton_spring import spring_follow, render
 from pipeline.scail import drive_character
 from pipeline.spring_time_remap import time_remap_file
 
-DEFAULT_IDLE_PROMPT = ("A person stands in place in a relaxed idle stance, breathing calmly, "
-                       "swaying gently from side to side, with small subtle movements of the head and arms.")
+DEFAULT_IDLE_PROMPT = (
+    "A person holds their current pose in a relaxed idle, breathing calmly, "
+    "with only tiny subtle micro-movements of the head and torso. "
+    "Keep the same overall posture; no large joint rotations, no big arm or leg swings, "
+    "no twisting or turning."
+)
 FPS = 30                      # Kimodo output is 30 fps
 JOINT_SPRING = dict(omega=20.0, zeta=0.35, soft=1.0)   # action joint-overshoot defaults
 TIME_SPRING = dict(b=0.42, d=4.2, f=2.4, t=1.15)       # action time-overshoot params

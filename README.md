@@ -45,7 +45,7 @@ http://127.0.0.1:8500
 1. **Upload a character image** — drag and drop or click to select
 2. **Enter an action prompt** — describe the motion you want (required)
 3. **Enter an idle prompt** (optional) — describe a relaxed idle animation
-   - If left blank, uses a default idle: calm breathing, gentle side-to-side sway, small head/arm movement, feet planted
+   - If left blank, uses a default idle: hold current pose, calm breathing, tiny micro-movements only (no large joint rotations)
 4. **Overshoot options** (optional, both can be selected and stack):
    - **Joint** — applies damped-spring overshoot to the skeleton in joint-space on the action only
    - **Time** — applies overshoot to the playback timing of the rendered action video

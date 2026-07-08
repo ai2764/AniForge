@@ -11,5 +11,8 @@ def test_sanitize_drops_turning():
     assert "turn" not in sanitize_action("she turns and waves").lower()
 
 
-def test_default_idle_is_in_place():
-    assert "in place" in DEFAULT_IDLE_PROMPT.lower()
+def test_default_idle_keeps_pose_and_avoids_large_motion():
+    p = DEFAULT_IDLE_PROMPT.lower()
+    assert "current pose" in p or "overall posture" in p
+    assert "large joint" in p or "no large" in p
+    assert "stand" not in p

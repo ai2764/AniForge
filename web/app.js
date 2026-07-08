@@ -87,6 +87,7 @@
 
       if (data.action) {
         actionVideo.src = data.action;
+        actionVideo.load();
         hasAction = true;
         preview.classList.add("has-action");
       }
@@ -112,18 +113,43 @@
   });
 
   // -- click-triggered player ----------------------------------------------
+  function returnToIdle() {
+    actionVideo.pause();
+    actionVideo.style.display = "none";
+    idleVideo.style.display = "block";
+    idleVideo.play().catch(() => {});
+  }
+
   preview.addEventListener("click", () => {
     if (!hasAction) return;
+    if (actionVideo.error) {
+      errorsEl.textContent = "Action video failed to load (unsupported or missing).";
+      return;
+    }
     idleVideo.pause();
     idleVideo.style.display = "none";
     actionVideo.style.display = "block";
-    actionVideo.currentTime = 0;
-    actionVideo.play();
+    try {
+      actionVideo.currentTime = 0;
+    } catch (_) {
+      /* ignore if metadata not ready yet */
+    }
+    const playPromise = actionVideo.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {
+        errorsEl.textContent = "Action video failed to play.";
+        returnToIdle();
+      });
+    }
   });
 
   actionVideo.addEventListener("ended", () => {
-    actionVideo.style.display = "none";
-    idleVideo.style.display = "block";
-    idleVideo.play();
+    returnToIdle();
+  });
+
+  actionVideo.addEventListener("error", () => {
+    if (hasAction) {
+      errorsEl.textContent = "Action video failed to load (unsupported or missing).";
+    }
   });
 })();

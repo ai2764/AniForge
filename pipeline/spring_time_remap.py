@@ -100,13 +100,46 @@ def read_video(path: Path):
 
 
 def write_video(path: Path, frames, fps: float) -> None:
+    """Write frames as browser-playable H.264/yuv420p mp4 via ffmpeg.
+
+    OpenCV's default ``mp4v`` (MPEG-4 Part 2) is widely rejected by HTML5
+    video elements, which broke click-to-play of the timed action clip.
+    """
+    import os
+    import subprocess
+
     h, w = frames[0].shape[:2]
-    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg = os.environ.get("FFMPEG_PATH", "ffmpeg")
+
+    # Intermediate mp4v is reliable for OpenCV writers; re-encode for browsers.
+    tmp = path.with_suffix(path.suffix + ".tmp.mp4")
+    writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
     if not writer.isOpened():
-        raise SystemExit(f"cannot open video writer for: {path}")
-    for frame in frames:
-        writer.write(frame)
-    writer.release()
+        raise SystemExit(f"cannot open video writer for: {tmp}")
+    try:
+        for frame in frames:
+            writer.write(frame)
+    finally:
+        writer.release()
+
+    try:
+        subprocess.run(
+            [
+                ffmpeg, "-y", "-i", str(tmp),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an",
+                "-movflags", "+faststart",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def time_remap_file(inp: Path, out: Path, b=0.42, d=4.2, f=2.4, t=1.15, sampling="blend"):
