@@ -142,67 +142,70 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "expected multipart/form-data"})
             return
 
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype},
-        )
-
-        image_item = form["image"] if "image" in form else None
-        if image_item is None or not getattr(image_item, "filename", None):
-            self._send_json(400, {"error": "missing 'image' upload"})
-            return
-
-        fields = {
-            "action_prompt": form.getvalue("action_prompt", ""),
-            "idle_prompt": form.getvalue("idle_prompt", ""),
-            "overshoot": form.getlist("overshoot"),
-        }
-        parsed = parse_generate_form(fields)
-
-        client = ComfyClient()
         try:
-            object_info = client.object_info()
-        except Exception as exc:
-            self._send_json(503, {"error": f"ComfyUI unreachable: {exc}"})
-            return
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype},
+            )
 
-        if not required_nodes_present(object_info):
-            missing = [n for n in REQUIRED_NODES if n not in object_info]
-            self._send_json(503, {
-                "error": "ComfyUI is missing required custom nodes",
-                "missing_nodes": missing,
+            image_item = form["image"] if "image" in form else None
+            if image_item is None or not getattr(image_item, "filename", None):
+                self._send_json(400, {"error": "missing 'image' upload"})
+                return
+
+            fields = {
+                "action_prompt": form.getvalue("action_prompt", ""),
+                "idle_prompt": form.getvalue("idle_prompt", ""),
+                "overshoot": form.getlist("overshoot"),
+            }
+            parsed = parse_generate_form(fields)
+
+            client = ComfyClient()
+            try:
+                object_info = client.object_info()
+            except Exception as exc:
+                self._send_json(503, {"error": f"ComfyUI unreachable: {exc}"})
+                return
+
+            if not required_nodes_present(object_info):
+                missing = [n for n in REQUIRED_NODES if n not in object_info]
+                self._send_json(503, {
+                    "error": "ComfyUI is missing required custom nodes",
+                    "missing_nodes": missing,
+                })
+                return
+
+            run_id = uuid.uuid4().hex
+            run_dir = RUNS_DIR / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            ext = Path(image_item.filename).suffix or ".png"
+            image_path = run_dir / f"input{ext}"
+            image_path.write_bytes(image_item.file.read())
+
+            result = generate(
+                image_path,
+                parsed["action_prompt"],
+                parsed["idle_prompt"],
+                parsed["overshoot"],
+                run_dir=run_dir,
+                client=client,
+            )
+
+            def to_url(p):
+                if p is None:
+                    return None
+                rel = Path(p).resolve().relative_to(REPO_ROOT.resolve())
+                return "/" + rel.as_posix()
+
+            self._send_json(200, {
+                "idle": to_url(result.get("idle")),
+                "action": to_url(result.get("action")),
+                "errors": result.get("errors", {}),
             })
-            return
-
-        run_id = uuid.uuid4().hex
-        run_dir = RUNS_DIR / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        ext = Path(image_item.filename).suffix or ".png"
-        image_path = run_dir / f"input{ext}"
-        image_path.write_bytes(image_item.file.read())
-
-        result = generate(
-            image_path,
-            parsed["action_prompt"],
-            parsed["idle_prompt"],
-            parsed["overshoot"],
-            run_dir=run_dir,
-            client=client,
-        )
-
-        def to_url(p):
-            if p is None:
-                return None
-            rel = Path(p).resolve().relative_to(REPO_ROOT.resolve())
-            return "/" + rel.as_posix()
-
-        self._send_json(200, {
-            "idle": to_url(result.get("idle")),
-            "action": to_url(result.get("action")),
-            "errors": result.get("errors", {}),
-        })
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
 
     # quieter default logging (still useful, but avoid noisy stderr in tests)
     def log_message(self, fmt, *args):
