@@ -112,7 +112,9 @@ These are enabling work, tracked as the first tasks of the plan:
 
 1. **Kimodo operational** on ComfyUI-scail: node `jtydhr88/ComfyUI-Kimodo` is
    installed and loaded; `Kimodo-SOMA-RP-v1` (public) + the shared Llama-3-8B
-   encoder (gated, access granted) download and generate an NPZ.
+   encoder (gated, access granted) download and generate an NPZ. **Kimodo is a
+   hard requirement — there is no HY-Motion fallback for this MVP** (HY-Motion
+   can't ingest pose constraints, which the v2 anchor path depends on).
 2. **SOMA 30-joint renderer**: adapt `skeleton_spring.py` from the SMPL 22-joint
    layout to SOMA's 30-joint skeleton (bone topology already extracted from
    `kimodo/skeleton/definitions.py` — `SOMASkeleton30.bone_order_names_with_parents`).
@@ -147,7 +149,10 @@ These are enabling work, tracked as the first tasks of the plan:
   is ~1GB. VRAM ~17GB fits the RTX 4090.
 - SOMA (30-joint) vs SMPL (22): chose SOMA because it is public (no gate) and
   NVIDIA-primary; the renderer adaptation is the cost. Downstream scail is
-  format-tolerant (drove from HY-Motion custom skeletons and from RGB body video).
+  format-tolerant (drove from custom skeletons and from RGB body video).
+- Kimodo dependency risk: the encoder path (`gptqmodel`/`optimum`/`pcre`) was
+  unresolved at plan time. Since there is no fallback, this is the gating risk —
+  Task 1 must resolve it or escalate, not route around it.
 - Forward-reach (Z-depth) actions are ambiguous in the 2D front projection and
   can still make scail turn the body; this is a content/prompt limitation, not a
   bug, and is out of scope to fully solve in MVP.
