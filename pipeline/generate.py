@@ -8,6 +8,7 @@ branch's clip from being returned.
 """
 from __future__ import annotations
 
+import random
 import re
 from pathlib import Path
 
@@ -51,53 +52,80 @@ def _pad_to_9x16(inp, out):
                    check=True, capture_output=True)
 
 
+def _build_guide(client, prompt, npz_path, skel_path, guide_path, *,
+                 model, seed, comfy_output, joint):
+    """Kimodo motion -> optional joint-space spring -> fixed-frame render -> pad.
+    Returns (guide_path, scail_length)."""
+    npz = generate_motion(client, prompt, npz_path, model=model, seed=seed,
+                          comfy_output=comfy_output)
+    kpts = load_posed_joints(npz)
+    if joint:
+        kpts = spring_follow(kpts, FPS, omega=JOINT_SPRING["omega"],
+                             zeta=JOINT_SPRING["zeta"], soft_scale=JOINT_SPRING["soft"])
+    render(kpts, skel_path, FPS, fixed=True)
+    _pad_to_9x16(skel_path, guide_path)
+    return guide_path, align_4k1(len(kpts))
+
+
 def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
-             run_dir: Path, client, *, motion_model="Kimodo-SOMA-RP-v1",
+             run_dir: Path, client, *, motion_model="Kimodo-SOMA-RP-v1", seed=None,
              comfy_input=Path("C:/Users/AIBOX/dev/ComfyUI-scail/input"),
              comfy_output=Path("C:/Users/AIBOX/dev/ComfyUI-scail/output")) -> dict:
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     image = Path(image)
     plan = plan_steps(overshoot)
+    if seed is None:
+        seed = random.randint(0, 2**31 - 1)
 
-    result = {"idle": None, "action": None, "errors": {}}
+    result = {"idle": None, "action": None, "errors": {}, "seed": seed}
 
+    # Phase 1: generate BOTH motions -> padded skeleton guides.
+    # Doing both Kimodo passes back-to-back keeps its model hot in VRAM instead
+    # of swapping Kimodo<->SCAIL between clips.
+    idle_guide = action_guide = None
+    idle_len = action_len = None
     try:
-        npz = generate_motion(client, idle_prompt or DEFAULT_IDLE_PROMPT, run_dir / "idle.npz",
-                               model=motion_model, comfy_output=comfy_output)
-        kpts = load_posed_joints(npz)
-        render(kpts, run_dir / "idle_skel.mp4", FPS, fixed=True)
-        _pad_to_9x16(run_dir / "idle_skel.mp4", run_dir / "idle_guide.mp4")
-        result["idle"] = drive_character(
-            client, run_dir / "idle_guide.mp4", image, run_dir / "idle.mp4",
-            length=align_4k1(len(kpts)), prefix="mp_idle",
-            positive="a character in a calm idle pose, full body, consistent identity",
-            comfy_input=comfy_input)
+        idle_guide, idle_len = _build_guide(
+            client, idle_prompt or DEFAULT_IDLE_PROMPT,
+            run_dir / "idle.npz", run_dir / "idle_skel.mp4", run_dir / "idle_guide.mp4",
+            model=motion_model, seed=seed, comfy_output=comfy_output, joint=False)
     except Exception as exc:
-        result["errors"]["idle"] = str(exc)
-
+        result["errors"]["idle_motion"] = str(exc)
     try:
-        npz = generate_motion(client, sanitize_action(action_prompt), run_dir / "action.npz",
-                               model=motion_model, comfy_output=comfy_output)
-        kpts = load_posed_joints(npz)
-        if plan["joint"]:
-            kpts = spring_follow(kpts, FPS, omega=JOINT_SPRING["omega"],
-                                  zeta=JOINT_SPRING["zeta"], soft_scale=JOINT_SPRING["soft"])
-        render(kpts, run_dir / "action_skel.mp4", FPS, fixed=True)
-        _pad_to_9x16(run_dir / "action_skel.mp4", run_dir / "action_guide.mp4")
-        action_path = drive_character(
-            client, run_dir / "action_guide.mp4", image, run_dir / "action.mp4",
-            length=align_4k1(len(kpts)), prefix="mp_action",
-            positive="a character performing an action, full body, consistent identity",
-            comfy_input=comfy_input)
-        if plan["time"]:
-            try:
-                time_remap_file(action_path, run_dir / "action_timed.mp4", **TIME_SPRING)
-                action_path = run_dir / "action_timed.mp4"
-            except Exception as exc:
-                result["errors"]["time_remap"] = str(exc)  # keep the un-timed action_path
-        result["action"] = action_path
+        action_guide, action_len = _build_guide(
+            client, sanitize_action(action_prompt),
+            run_dir / "action.npz", run_dir / "action_skel.mp4", run_dir / "action_guide.mp4",
+            model=motion_model, seed=seed, comfy_output=comfy_output, joint=plan["joint"])
     except Exception as exc:
-        result["errors"]["action"] = str(exc)
+        result["errors"]["action_motion"] = str(exc)
+
+    # Phase 2: drive the character image with BOTH guides (SCAIL model stays hot).
+    if idle_guide is not None:
+        try:
+            result["idle"] = drive_character(
+                client, idle_guide, image, run_dir / "idle.mp4",
+                length=idle_len, prefix="mp_idle", seed=seed,
+                positive="a character in a calm idle pose, full body, consistent identity",
+                comfy_input=comfy_input)
+        except Exception as exc:
+            result["errors"]["idle_scail"] = str(exc)
+
+    if action_guide is not None:
+        try:
+            action_path = drive_character(
+                client, action_guide, image, run_dir / "action.mp4",
+                length=action_len, prefix="mp_action", seed=seed,
+                positive="a character performing an action, full body, consistent identity",
+                comfy_input=comfy_input)
+            if plan["time"]:
+                try:
+                    time_remap_file(action_path, run_dir / "action_timed.mp4", **TIME_SPRING)
+                    action_path = run_dir / "action_timed.mp4"
+                except Exception as exc:
+                    result["errors"]["time_remap"] = str(exc)  # keep the un-timed action_path
+            result["action"] = action_path
+        except Exception as exc:
+            result["errors"]["action_scail"] = str(exc)
 
     return result

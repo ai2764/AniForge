@@ -45,16 +45,23 @@ CONTENT_TYPES = {
 
 def parse_generate_form(fields: dict) -> dict:
     """fields: dict with "action_prompt" (str), "idle_prompt" (str),
-    "overshoot" (list[str]). Returns the normalized request dict."""
+    "overshoot" (list[str]), "seed" (str, optional). Returns the normalized
+    request dict. A blank/missing/non-numeric seed becomes None (= random)."""
     action_prompt = fields.get("action_prompt") or ""
     idle_prompt = fields.get("idle_prompt") or None
     if isinstance(idle_prompt, str) and not idle_prompt.strip():
         idle_prompt = None
     overshoot = set(fields.get("overshoot") or [])
+    raw_seed = fields.get("seed")
+    try:
+        seed = int(raw_seed) if raw_seed not in (None, "") else None
+    except (TypeError, ValueError):
+        seed = None
     return {
         "action_prompt": action_prompt,
         "idle_prompt": idle_prompt,
         "overshoot": overshoot,
+        "seed": seed,
     }
 
 
@@ -195,6 +202,7 @@ class Handler(BaseHTTPRequestHandler):
                 parsed["overshoot"],
                 run_dir=run_dir,
                 client=client,
+                seed=parsed["seed"],
             )
 
             def to_url(p):
@@ -207,6 +215,7 @@ class Handler(BaseHTTPRequestHandler):
                 "idle": to_url(result.get("idle")),
                 "action": to_url(result.get("action")),
                 "errors": result.get("errors", {}),
+                "seed": result.get("seed"),
             })
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})

@@ -64,6 +64,10 @@
     for (const box of form.querySelectorAll('input[name="overshoot"]:checked')) {
       formData.append("overshoot", box.value);
     }
+    const seedValue = document.getElementById("seed").value.trim();
+    if (seedValue !== "") {
+      formData.append("seed", seedValue);
+    }
 
     statusEl.textContent = "Generating...";
     hasAction = false;
@@ -95,7 +99,12 @@
         errorsEl.textContent = JSON.stringify(data.errors, null, 2);
       }
 
-      statusEl.textContent = "Done.";
+      if (data.seed !== undefined && data.seed !== null) {
+        document.getElementById("seed").value = data.seed;
+        statusEl.textContent = "Done. (seed " + data.seed + ")";
+      } else {
+        statusEl.textContent = "Done.";
+      }
     } catch (err) {
       statusEl.textContent = "Request failed.";
       errorsEl.textContent = String(err);
