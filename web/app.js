@@ -68,6 +68,8 @@
     statusEl.textContent = "Generating...";
     hasAction = false;
     preview.classList.remove("has-action");
+    actionVideo.pause();
+    actionVideo.style.display = "none";
 
     try {
       const res = await fetch("/generate", { method: "POST", body: formData });
