@@ -1,7 +1,7 @@
 """Joint-space spring on Kimodo SOMA keypoints: damped-spring follower per joint,
 then render the body-subset skeleton for the scail motion guide.
 
-Vendored from camera-lab/tasks/live2d/skeletons/skeleton_spring.py and adapted
+Vendored from youtube-video-lab/tasks/live2d/skeletons/skeleton_spring.py and adapted
 for the Kimodo SOMASkeleton77 body subset (pipeline.skeletons). This module is
 self-contained: BONES/COLORS/SOFT/N_JOINTS come from pipeline.skeletons, no
 fixed 22/30-joint slicing.
