@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Motion Portrait</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 640px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+  }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; flex-direction: column; gap: 0.75rem; }
+  label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
+  input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem;
+  }
+  #drop-zone {
+    border: 2px dashed #888;
+    border-radius: 6px;
+    padding: 1rem;
+    text-align: center;
+    cursor: pointer;
+  }
+  #drop-zone.dragover { border-color: #2a7de1; background: rgba(42, 125, 225, 0.08); }
+  #drop-zone.has-image { border-style: solid; }
+  #drop-zone img { max-width: 100%; max-height: 160px; display: block; margin: 0.5rem auto 0; }
+  .checkboxes { display: flex; gap: 1.5rem; }
+  .checkboxes label { font-weight: normal; display: flex; align-items: center; gap: 0.35rem; margin: 0; }
+  button {
+    padding: 0.6rem;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  #status { min-height: 1.2em; }
+  #errors { color: #c0392b; white-space: pre-wrap; }
+  #preview {
+    position: relative;
+    margin-top: 1.5rem;
+    max-width: 100%;
+    background: #000;
+    border-radius: 6px;
+    overflow: hidden;
+    display: none;
+  }
+  #preview video {
+    width: 100%;
+    display: block;
+  }
+  #actionVideo { display: none; }
+  #preview.has-action { cursor: pointer; }
+</style>
+</head>
+<body>
+  <h1>Motion Portrait</h1>
+
+  <form id="generate-form">
+    <div>
+      <label for="image-input">Character image</label>
+      <div id="drop-zone">
+        <span id="drop-zone-text">Click or drag an image here</span>
+        <img id="drop-zone-preview" style="display:none">
+      </div>
+      <input type="file" id="image-input" name="image" accept="image/*" style="display:none">
+    </div>
+
+    <div>
+      <label for="action_prompt">Action prompt</label>
+      <input type="text" id="action_prompt" name="action_prompt" required>
+    </div>
+
+    <div>
+      <label for="idle_prompt">Idle prompt (optional)</label>
+      <input type="text" id="idle_prompt" name="idle_prompt">
+    </div>
+
+    <div class="checkboxes">
+      <label><input type="checkbox" name="overshoot" value="joint"> Joint overshoot</label>
+      <label><input type="checkbox" name="overshoot" value="time"> Time overshoot</label>
+    </div>
+
+    <button type="submit">Generate</button>
+    <div id="status"></div>
+    <div id="errors"></div>
+  </form>
+
+  <div id="preview">
+    <video id="idleVideo" loop muted playsinline autoplay></video>
+    <video id="actionVideo" muted playsinline></video>
+  </div>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>
