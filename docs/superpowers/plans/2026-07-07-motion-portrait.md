@@ -214,12 +214,12 @@ git commit -m "feat: ComfyUI client + repo scaffolding"
 - Test: `tests/test_skeleton_spring.py`
 
 **Interfaces:**
-- Consumes: the NPZ joint array from Task 1 (`keypoints3d`-style `[T, J, 3]`).
+- Consumes: the Kimodo NPZ from Task 1 — the joint array is under key **`posed_joints`** with shape **`[T, 77, 3]`** (SOMASkeleton77; 30 fps). Load `posed_joints`, not `keypoints3d`.
 - Produces:
   - `spring_follow(target, fps, omega, zeta, soft_scale) -> ndarray` (adaptive-substep damped follower; stable at large omega)
   - `frame_fixed(all_kpts) -> (cx, cy, scale)`
   - `render(kpts, path, fps, size=512, fixed=True)` — writes an mp4 skeleton video
-  - `SKELETON` bone list + `SOFT` per-joint softness for SOMA-30
+  - `BONES`/`COLORS`/`SOFT`/`N_JOINTS` in `pipeline/skeletons.py` for the SOMASkeleton77 **body chain**
 
 - [ ] **Step 1: Copy the existing script**
 
@@ -250,11 +250,11 @@ def test_bones_indices_in_range():
 Run: `python -m pytest tests/test_skeleton_spring.py -v`
 Expected: FAIL (module/attr not found until `skeletons.py` + import wiring exist).
 
-- [ ] **Step 4: Build `pipeline/skeletons.py` for the chosen skeleton**
+- [ ] **Step 4: Build `pipeline/skeletons.py` from SOMASkeleton77**
 
-Define the 30-joint SOMA order and bones from `ComfyUI-Kimodo/kimodo/kimodo/skeleton/definitions.py` `SOMASkeleton30.bone_order_names_with_parents` (Hips, Spine1, Spine2, Chest, Neck1, Neck2, Head, Jaw, LeftEye, RightEye, LeftShoulder, LeftArm, LeftForeArm, LeftHand, LeftHandThumbEnd, LeftHandMiddleEnd, RightShoulder, RightArm, RightForeArm, RightHand, RightHandThumbEnd, RightHandMiddleEnd, LeftLeg, LeftShin, LeftFoot, LeftToeBase, RightLeg, RightShin, RightFoot, RightToeBase). Build `BONES` as `(child_index, parent_index)` pairs from that parent map; set `N_JOINTS = 30`. Assign `SOFT`: core (Hips, Spine*, Chest, Neck*, hips/legs roots) 0.0; mid (shoulders, arms, shins) 0.35; soft (forearms, feet) 0.7; softest (hands + finger tips, toes) 1.0; face joints (Jaw, eyes) 0.0. Give each bone a color.
+The NPZ `posed_joints` is `[T, 77, 3]` in `SOMASkeleton77` order. Read the joint order and parent map from `ComfyUI-Kimodo/kimodo/kimodo/skeleton/definitions.py` `SOMASkeleton77.bone_order_names_with_parents` (print the list at implementation time — it is long). Select a **body subset** for the scail guide: the torso/limb chain (Hips, Spine*, Chest, Neck*, Head, shoulders, arms, forearms, hands, legs, shins, feet, toes) — drop the individual finger and eye/jaw joints (they clutter the guide and scail does not need them). Define `BODY_JOINTS` = the ordered list of 77-index positions kept; `N_JOINTS = len(BODY_JOINTS)`; remap `BONES` to indices within `BODY_JOINTS`. Assign `SOFT` per kept joint: core (Hips, Spine*, Chest, Neck*, hips/leg roots) 0.0; mid (shoulders, arms, shins) 0.35; soft (forearms, feet) 0.7; softest (hands, toes) 1.0. Give each bone a color.
 
-Update `skeleton_spring.py` to import `BONES, COLORS, SOFT, N_JOINTS` from `pipeline.skeletons` and slice `[:, :N_JOINTS, :]`.
+Add a loader `load_posed_joints(npz_path) -> ndarray[T, N_JOINTS, 3]` that reads `posed_joints` and gathers `BODY_JOINTS`. Update `skeleton_spring.py` to import `BONES, COLORS, SOFT, N_JOINTS` from `pipeline.skeletons` and operate on the gathered body array (no fixed 22/30 slice).
 
 - [ ] **Step 5: Run tests to verify they pass**
 
