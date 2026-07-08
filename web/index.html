@@ -29,8 +29,31 @@
   #drop-zone.dragover { border-color: #2a7de1; background: rgba(42, 125, 225, 0.08); }
   #drop-zone.has-image { border-style: solid; }
   #drop-zone img { max-width: 100%; max-height: 160px; display: block; margin: 0.5rem auto 0; }
-  .checkboxes { display: flex; gap: 1.5rem; }
+  .checkboxes { display: flex; gap: 1.5rem; flex-wrap: wrap; }
   .checkboxes label { font-weight: normal; display: flex; align-items: center; gap: 0.35rem; margin: 0; }
+  .pose-toggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid #888;
+    border-radius: 6px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .pose-toggle label {
+    font-weight: normal;
+    margin: 0;
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+    border-right: 1px solid #888;
+    user-select: none;
+  }
+  .pose-toggle label:last-child { border-right: none; }
+  .pose-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .pose-toggle label:has(input:checked) {
+    background: #2a7de1;
+    color: #fff;
+  }
+  .pose-hint { font-size: 0.85rem; opacity: 0.75; margin: 0.25rem 0 0; }
   button {
     padding: 0.6rem;
     font-size: 1rem;
@@ -69,6 +92,16 @@
     </div>
 
     <div>
+      <label>Pose mode</label>
+      <div class="pose-toggle" role="radiogroup" aria-label="Pose mode">
+        <label><input type="radio" name="pose_mode" value="standing" checked> Standing</label>
+        <label><input type="radio" name="pose_mode" value="sitting"> Sitting</label>
+        <label><input type="radio" name="pose_mode" value="lying"> Lying</label>
+      </div>
+      <p class="pose-hint" id="pose-hint">Standing: free motion from prompts (no pose pin).</p>
+    </div>
+
+    <div>
       <label for="action_prompt">Action prompt</label>
       <input type="text" id="action_prompt" name="action_prompt" required>
     </div>
@@ -78,8 +111,8 @@
       <input type="text" id="idle_prompt" name="idle_prompt">
     </div>
 
-    <div class="checkboxes">
-      <label><input type="checkbox" name="overshoot" value="joint"> Joint overshoot</label>
+    <div class="checkboxes" id="overshoot-row">
+      <label><input type="checkbox" name="overshoot" value="joint" id="overshoot-joint"> Joint overshoot</label>
       <label><input type="checkbox" name="overshoot" value="time"> Time overshoot</label>
     </div>
 

@@ -12,6 +12,35 @@
 
   let hasAction = false;
 
+  const POSE_HINTS = {
+    standing: "Standing: free motion from prompts (no pose pin).",
+    sitting: "Sitting: pin pelvis + feet from the image; upper body free.",
+    lying: "Lying: full skeleton lock to the image pose (small motion only).",
+  };
+  const poseHint = document.getElementById("pose-hint");
+  const jointOvershoot = document.getElementById("overshoot-joint");
+
+  function selectedPoseMode() {
+    const el = form.querySelector('input[name="pose_mode"]:checked');
+    return el ? el.value : "standing";
+  }
+
+  function syncPoseUi() {
+    const mode = selectedPoseMode();
+    if (poseHint) poseHint.textContent = POSE_HINTS[mode] || POSE_HINTS.standing;
+    // Joint overshoot is SOMA/standing-path only.
+    if (jointOvershoot) {
+      const standing = mode === "standing";
+      jointOvershoot.disabled = !standing;
+      if (!standing) jointOvershoot.checked = false;
+    }
+  }
+
+  form.querySelectorAll('input[name="pose_mode"]').forEach((el) => {
+    el.addEventListener("change", syncPoseUi);
+  });
+  syncPoseUi();
+
   // -- image picker (click or drag) --------------------------------------
   dropZone.addEventListener("click", () => imageInput.click());
 
@@ -61,6 +90,7 @@
     formData.append("image", imageInput.files[0]);
     formData.append("action_prompt", document.getElementById("action_prompt").value);
     formData.append("idle_prompt", document.getElementById("idle_prompt").value);
+    formData.append("pose_mode", selectedPoseMode());
     for (const box of form.querySelectorAll('input[name="overshoot"]:checked')) {
       formData.append("overshoot", box.value);
     }
@@ -69,7 +99,9 @@
       formData.append("seed", seedValue);
     }
 
-    statusEl.textContent = "Generating...";
+    const mode = selectedPoseMode();
+    statusEl.textContent =
+      mode === "standing" ? "Generating..." : "Generating (" + mode + ", pose-anchored)...";
     hasAction = false;
     preview.classList.remove("has-action");
     actionVideo.pause();

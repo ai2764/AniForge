@@ -43,13 +43,17 @@ http://127.0.0.1:8500
 ## Usage
 
 1. **Upload a character image** — drag and drop or click to select
-2. **Enter an action prompt** — describe the motion you want (required)
-3. **Enter an idle prompt** (optional) — describe a relaxed idle animation
+2. **Pose mode** (required choice):
+   - **Standing** — free motion from prompts (Kimodo-SOMA, no pose pin)
+   - **Sitting** — extract pose from the image, pin pelvis + feet, upper body free
+   - **Lying** — extract pose and **full-skeleton lock** (small motion only)
+3. **Enter an action prompt** — describe the motion you want (required)
+4. **Enter an idle prompt** (optional) — describe a relaxed idle animation
    - If left blank, uses a default idle: hold current pose, calm breathing, tiny micro-movements only (no large joint rotations)
-4. **Overshoot options** (optional, both can be selected and stack):
-   - **Joint** — applies damped-spring overshoot to the skeleton in joint-space on the action only
-   - **Time** — applies overshoot to the playback timing of the rendered action video
-5. **Click Generate** and wait for both clips to render
+5. **Overshoot options** (optional; joint overshoot is standing-only):
+   - **Joint** — damped-spring overshoot in joint-space on the action (standing path)
+   - **Time** — overshoot on playback timing of the rendered action video
+6. **Click Generate** and wait for both clips to render
 
 The preview page loops the idle animation. Click the preview to play the action clip; it will return to idle when finished.
 

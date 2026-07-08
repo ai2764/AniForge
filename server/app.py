@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.comfy import ComfyClient  # noqa: E402
 from pipeline.generate import generate  # noqa: E402
+from pipeline.seated.generate_anchored import generate_anchored  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
@@ -43,10 +44,14 @@ CONTENT_TYPES = {
 # Pure helpers (unit-tested, no I/O)
 # ---------------------------------------------------------------------------
 
+POSE_MODES = ("standing", "sitting", "lying")
+
+
 def parse_generate_form(fields: dict) -> dict:
     """fields: dict with "action_prompt" (str), "idle_prompt" (str),
-    "overshoot" (list[str]), "seed" (str, optional). Returns the normalized
-    request dict. A blank/missing/non-numeric seed becomes None (= random)."""
+    "overshoot" (list[str]), "seed" (str, optional), "pose_mode" (str).
+    Returns the normalized request dict. A blank/missing/non-numeric seed
+    becomes None (= random). pose_mode defaults to standing."""
     action_prompt = fields.get("action_prompt") or ""
     idle_prompt = fields.get("idle_prompt") or None
     if isinstance(idle_prompt, str) and not idle_prompt.strip():
@@ -57,11 +62,15 @@ def parse_generate_form(fields: dict) -> dict:
         seed = int(raw_seed) if raw_seed not in (None, "") else None
     except (TypeError, ValueError):
         seed = None
+    pose_mode = (fields.get("pose_mode") or "standing").strip().lower()
+    if pose_mode not in POSE_MODES:
+        pose_mode = "standing"
     return {
         "action_prompt": action_prompt,
         "idle_prompt": idle_prompt,
         "overshoot": overshoot,
         "seed": seed,
+        "pose_mode": pose_mode,
     }
 
 
@@ -169,6 +178,8 @@ class Handler(BaseHTTPRequestHandler):
                 "action_prompt": form.getvalue("action_prompt", ""),
                 "idle_prompt": form.getvalue("idle_prompt", ""),
                 "overshoot": form.getlist("overshoot"),
+                "seed": form.getvalue("seed", ""),
+                "pose_mode": form.getvalue("pose_mode", "standing"),
             }
             parsed = parse_generate_form(fields)
 
@@ -179,11 +190,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(503, {"error": f"ComfyUI unreachable: {exc}"})
                 return
 
-            if not required_nodes_present(object_info):
-                missing = [n for n in REQUIRED_NODES if n not in object_info]
+            # Standing path needs Kimodo Comfy nodes; sitting/lying use standalone Kimodo
+            # but still need SCAIL in ComfyUI.
+            if parsed["pose_mode"] == "standing":
+                if not required_nodes_present(object_info):
+                    missing = [n for n in REQUIRED_NODES if n not in object_info]
+                    self._send_json(503, {
+                        "error": "ComfyUI is missing required custom nodes",
+                        "missing_nodes": missing,
+                    })
+                    return
+            elif "WanSCAILToVideo" not in object_info:
                 self._send_json(503, {
-                    "error": "ComfyUI is missing required custom nodes",
-                    "missing_nodes": missing,
+                    "error": "ComfyUI is missing SCAIL nodes required for sitting/lying",
+                    "missing_nodes": ["WanSCAILToVideo"],
                 })
                 return
 
@@ -195,15 +215,27 @@ class Handler(BaseHTTPRequestHandler):
             image_path = run_dir / f"input{ext}"
             image_path.write_bytes(image_item.file.read())
 
-            result = generate(
-                image_path,
-                parsed["action_prompt"],
-                parsed["idle_prompt"],
-                parsed["overshoot"],
-                run_dir=run_dir,
-                client=client,
-                seed=parsed["seed"],
-            )
+            if parsed["pose_mode"] == "standing":
+                result = generate(
+                    image_path,
+                    parsed["action_prompt"],
+                    parsed["idle_prompt"],
+                    parsed["overshoot"],
+                    run_dir=run_dir,
+                    client=client,
+                    seed=parsed["seed"],
+                )
+            else:
+                result = generate_anchored(
+                    image_path,
+                    parsed["action_prompt"],
+                    parsed["idle_prompt"],
+                    parsed["overshoot"],
+                    run_dir=run_dir,
+                    client=client,
+                    pose_mode=parsed["pose_mode"],
+                    seed=parsed["seed"],
+                )
 
             def to_url(p):
                 if p is None:
@@ -216,6 +248,7 @@ class Handler(BaseHTTPRequestHandler):
                 "action": to_url(result.get("action")),
                 "errors": result.get("errors", {}),
                 "seed": result.get("seed"),
+                "pose_mode": parsed["pose_mode"],
             })
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})

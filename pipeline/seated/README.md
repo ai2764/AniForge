@@ -1,10 +1,18 @@
-# Seated pose-anchored pipeline (smplx22)
+# Pose-anchored pipeline (sitting / lying, smplx22)
 
-Animate a **seated** character立绘 (idle + action) without SCAIL forcing it upright,
-by anchoring Kimodo's motion to the image's actual seated pose.
+Animate a **sitting or lying** character image (idle + action) without SCAIL forcing
+it upright, by anchoring Kimodo's motion to the image's actual pose.
 
-Image → HMR2 pose extract → **butt-pin** constraint → Kimodo (idle + action) →
-smplx22 skeleton guide → scail2 → seated animated立绘.
+Also exposed from the Web UI as **Pose mode → Sitting / Lying** (Standing uses the
+normal SOMA path in `pipeline.generate`).
+
+Image → HMR2 pose extract → pose-lock constraint → Kimodo-SMPLX (idle + action) →
+smplx22 skeleton guide → scail2 → animated portrait.
+
+| Mode | Constraint |
+|------|------------|
+| sitting | end-effector pin `Hips` + `LeftFoot` + `RightFoot` (upper body free) |
+| lying | **fullbody** joint lock all frames (skeleton locked to extract) |
 
 ## Files
 - `phase1_extract.py <image> <out_constraint.json> [T]` — HMR2 (4D-Humans) on the image →
@@ -41,7 +49,17 @@ a ComfyUI graph** — it wedges VRAM that only a server restart clears.
 
 ## Run
     cd motion-portrait
-    python pipeline/seated/run_seated_pipeline.py [path/to/ref.png]
+    python pipeline/seated/run_seated_pipeline.py [path/to/ref.png] --pose sitting
+    python pipeline/seated/run_seated_pipeline.py [path/to/ref.png] --pose lying
 
-Requires ComfyUI-scail up on :8188 (SCAIL + ComfyUI-Kimodo nodes) and the comfy-scail env
-(`MP_PYEXE` to override the interpreter for the subprocesses). Outputs land in `pipeline/seated/runs/`.
+Library entry used by the server:
+
+    from pipeline.seated import generate_anchored
+    generate_anchored(image, action, idle, overshoot, run_dir, client, pose_mode="sitting")
+
+Requires ComfyUI-scail up on :8188 (SCAIL) and the comfy-scail env for HMR2/Kimodo
+subprocesses (`MP_PYEXE` to override). Outputs land in `runs/<id>/` via the server,
+or `pipeline/seated/runs/` via the CLI.
+
+**Note:** Kimodo for sitting/lying is standalone (not via ComfyUI graph) so VRAM
+unloads when the subprocess exits.
