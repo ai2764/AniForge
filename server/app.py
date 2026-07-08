@@ -14,8 +14,12 @@ import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from pipeline.comfy import ComfyClient
-from pipeline.generate import generate
+# Allow `python server/app.py` from the repo root by putting the repo root
+# (which contains the `pipeline/` package) on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from pipeline.comfy import ComfyClient  # noqa: E402
+from pipeline.generate import generate  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
