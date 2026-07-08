@@ -91,8 +91,11 @@ def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
             positive="a character performing an action, full body, consistent identity",
             comfy_input=comfy_input)
         if plan["time"]:
-            time_remap_file(action_path, run_dir / "action_timed.mp4", **TIME_SPRING)
-            action_path = run_dir / "action_timed.mp4"
+            try:
+                time_remap_file(action_path, run_dir / "action_timed.mp4", **TIME_SPRING)
+                action_path = run_dir / "action_timed.mp4"
+            except Exception as exc:
+                result["errors"]["time_remap"] = str(exc)  # keep the un-timed action_path
         result["action"] = action_path
     except Exception as exc:
         result["errors"]["action"] = str(exc)
