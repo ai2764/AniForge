@@ -21,6 +21,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.comfy import ComfyClient  # noqa: E402
 from pipeline.generate import generate  # noqa: E402
 from pipeline.seated.generate_anchored import generate_anchored  # noqa: E402
+from pipeline.stages import (  # noqa: E402
+    create_session,
+    stage_action,
+    stage_bgremove,
+    stage_extract,
+    stage_idle,
+    stage_joint_overshoot,
+    stage_scail,
+    stage_time_overshoot,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "web"
@@ -33,6 +43,7 @@ CONTENT_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".mp4": "video/mp4",
+    ".webm": "video/webm",
     ".json": "application/json",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -49,9 +60,10 @@ POSE_MODES = ("standing", "sitting", "lying")
 
 def parse_generate_form(fields: dict) -> dict:
     """fields: dict with "action_prompt" (str), "idle_prompt" (str),
-    "overshoot" (list[str]), "seed" (str, optional), "pose_mode" (str).
-    Returns the normalized request dict. A blank/missing/non-numeric seed
-    becomes None (= random). pose_mode defaults to standing."""
+    "overshoot" (list[str]), "seed" (str, optional), "pose_mode" (str),
+    "scale" (str/float, optional). Returns the normalized request dict.
+    Blank seed -> None (random). pose_mode defaults to standing.
+    scale is 0.25–1.0 (fraction of max resolution, same aspect as image)."""
     action_prompt = fields.get("action_prompt") or ""
     idle_prompt = fields.get("idle_prompt") or None
     if isinstance(idle_prompt, str) and not idle_prompt.strip():
@@ -65,12 +77,18 @@ def parse_generate_form(fields: dict) -> dict:
     pose_mode = (fields.get("pose_mode") or "standing").strip().lower()
     if pose_mode not in POSE_MODES:
         pose_mode = "standing"
+    try:
+        scale = float(fields.get("scale") if fields.get("scale") not in (None, "") else 1.0)
+    except (TypeError, ValueError):
+        scale = 1.0
+    scale = max(0.25, min(1.0, scale))
     return {
         "action_prompt": action_prompt,
         "idle_prompt": idle_prompt,
         "overshoot": overshoot,
         "seed": seed,
         "pose_mode": pose_mode,
+        "scale": scale,
     }
 
 
@@ -104,13 +122,40 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_file(self, path: Path):
+        """Serve a file; support HTTP Range for HTML5 video seek/play."""
         if not path.is_file():
             self._send_json(404, {"error": f"not found: {path.name}"})
             return
         data = path.read_bytes()
+        ctype = _content_type_for(path)
+        total = len(data)
+        range_hdr = self.headers.get("Range") or self.headers.get("range")
+        # Browser <video> often sends Range; without 206 some clients mark MEDIA_ERR.
+        if range_hdr and range_hdr.startswith("bytes=") and total > 0:
+            try:
+                spec = range_hdr[len("bytes="):].strip()
+                start_s, _, end_s = spec.partition("-")
+                start = int(start_s) if start_s else 0
+                end = int(end_s) if end_s else (total - 1)
+                start = max(0, min(start, total - 1))
+                end = max(start, min(end, total - 1))
+                chunk = data[start : end + 1]
+                self.send_response(206)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+                self.send_header("Content-Length", str(len(chunk)))
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(chunk)
+                return
+            except (ValueError, TypeError):
+                pass
         self.send_response(200)
-        self.send_header("Content-Type", _content_type_for(path))
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(total))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 
@@ -151,10 +196,259 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/generate":
-            self._send_json(404, {"error": "not found"})
+        path = self.path.split("?", 1)[0]
+        if path == "/generate":
+            self._handle_generate()
             return
-        self._handle_generate()
+        if path == "/session":
+            self._handle_session_create()
+            return
+        if path == "/session/extract":
+            self._handle_session_extract()
+            return
+        if path == "/session/idle":
+            self._handle_session_idle()
+            return
+        if path == "/session/action":
+            self._handle_session_action()
+            return
+        if path == "/session/scail":
+            self._handle_session_scail()
+            return
+        if path == "/session/joint-overshoot":
+            self._handle_session_joint_overshoot()
+            return
+        if path == "/session/time-overshoot":
+            self._handle_session_time_overshoot()
+            return
+        if path == "/session/bgremove":
+            self._handle_session_bgremove()
+            return
+        # legacy alias
+        if path == "/session/overshoot":
+            self._handle_session_time_overshoot()
+            return
+        self._send_json(404, {"error": "not found"})
+
+    def _read_multipart(self):
+        ctype = self.headers.get("Content-Type", "")
+        if not ctype.startswith("multipart/form-data"):
+            return None, "expected multipart/form-data"
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype},
+        )
+        return form, None
+
+    def _handle_session_create(self):
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            image_item = form["image"] if "image" in form else None
+            if image_item is None or not getattr(image_item, "filename", None):
+                self._send_json(400, {"error": "missing 'image' upload"})
+                return
+            fields = {
+                "pose_mode": form.getvalue("pose_mode", "standing"),
+                "seed": form.getvalue("seed", ""),
+                "scale": form.getvalue("scale", "1"),
+                "action_prompt": "x",  # parse_generate_form requires key
+            }
+            parsed = parse_generate_form(fields)
+            data = create_session(
+                image_item.file.read(),
+                image_item.filename,
+                pose_mode=parsed["pose_mode"],
+                seed=parsed["seed"],
+                scale=parsed["scale"],
+                runs_dir=RUNS_DIR,
+            )
+            self._send_json(200, data)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_extract(self):
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            result = stage_extract(run_id, runs_dir=RUNS_DIR)
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_idle(self):
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            # idle = Kimodo skeleton only (no Comfy required)
+            raw_keep = form.getvalue("idle_motion_keep", "")
+            try:
+                idle_keep = float(raw_keep) if raw_keep not in (None, "") else None
+            except (TypeError, ValueError):
+                idle_keep = None
+            result = stage_idle(
+                run_id,
+                idle_prompt=form.getvalue("idle_prompt", "") or None,
+                idle_motion_keep=idle_keep,
+                runs_dir=RUNS_DIR,
+            )
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_action(self):
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            # action = Kimodo skeleton only (no Comfy, no overshoot)
+            raw_keep = form.getvalue("action_motion_keep", "")
+            try:
+                action_keep = float(raw_keep) if raw_keep not in (None, "") else None
+            except (TypeError, ValueError):
+                action_keep = None
+            raw_dur = form.getvalue("action_duration", "")
+            try:
+                action_dur = float(raw_dur) if raw_dur not in (None, "") else None
+            except (TypeError, ValueError):
+                action_dur = None
+            result = stage_action(
+                run_id,
+                action_prompt=form.getvalue("action_prompt", ""),
+                action_motion_keep=action_keep,
+                action_duration=action_dur,
+                runs_dir=RUNS_DIR,
+            )
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_scail(self):
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            client = ComfyClient()
+            try:
+                client.object_info()
+            except Exception as exc:
+                self._send_json(503, {"error": f"ComfyUI unreachable: {exc}"})
+                return
+            which = (form.getvalue("which") or "both").strip().lower()
+            result = stage_scail(
+                run_id,
+                which=which,
+                runs_dir=RUNS_DIR,
+                client=client,
+            )
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_joint_overshoot(self):
+        """Spring overshoot on action skeleton (before SCAIL). No Comfy."""
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            result = stage_joint_overshoot(run_id, runs_dir=RUNS_DIR)
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_time_overshoot(self):
+        """Time-remap final action character video (after SCAIL). No Comfy."""
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip()
+            if not run_id or not (RUNS_DIR / run_id).is_dir():
+                self._send_json(400, {"error": "invalid run_id"})
+                return
+            result = stage_time_overshoot(run_id, runs_dir=RUNS_DIR)
+            status = 200 if not result.get("errors") else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
+    def _handle_session_bgremove(self):
+        """Video BG removal — optional session videos and/or uploaded video (no prereqs)."""
+        try:
+            form, err = self._read_multipart()
+            if err:
+                self._send_json(400, {"error": err})
+                return
+            run_id = (form.getvalue("run_id") or "").strip() or None
+            which = (form.getvalue("which") or "both").strip().lower()
+            model = (form.getvalue("model") or "RVM MobileNetV3").strip()
+            upload_bytes = None
+            upload_filename = "upload.mp4"
+            if "video" in form:
+                item = form["video"]
+                if getattr(item, "filename", None):
+                    upload_filename = item.filename or upload_filename
+                    upload_bytes = item.file.read()
+            result = stage_bgremove(
+                run_id,
+                which=which,
+                model=model,
+                upload_bytes=upload_bytes,
+                upload_filename=upload_filename,
+                runs_dir=RUNS_DIR,
+            )
+            has_out = any(
+                result.get(k)
+                for k in (
+                    "idle_nobg",
+                    "action_nobg",
+                    "upload_nobg",
+                    "idle_nobg_webm",
+                    "action_nobg_webm",
+                    "upload_nobg_webm",
+                )
+            )
+            errs = result.get("errors") or {}
+            status = 200 if has_out or not errs else 500
+            self._send_json(status, result)
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
 
     def _handle_generate(self):
         ctype = self.headers.get("Content-Type", "")
@@ -180,6 +474,7 @@ class Handler(BaseHTTPRequestHandler):
                 "overshoot": form.getlist("overshoot"),
                 "seed": form.getvalue("seed", ""),
                 "pose_mode": form.getvalue("pose_mode", "standing"),
+                "scale": form.getvalue("scale", "1"),
             }
             parsed = parse_generate_form(fields)
 
@@ -224,6 +519,7 @@ class Handler(BaseHTTPRequestHandler):
                     run_dir=run_dir,
                     client=client,
                     seed=parsed["seed"],
+                    scale=parsed["scale"],
                 )
             else:
                 result = generate_anchored(
@@ -235,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
                     client=client,
                     pose_mode=parsed["pose_mode"],
                     seed=parsed["seed"],
+                    scale=parsed["scale"],
                 )
 
             def to_url(p):
@@ -249,6 +546,8 @@ class Handler(BaseHTTPRequestHandler):
                 "errors": result.get("errors", {}),
                 "seed": result.get("seed"),
                 "pose_mode": parsed["pose_mode"],
+                "scale": result.get("scale", parsed["scale"]),
+                "size": result.get("size"),
             })
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})

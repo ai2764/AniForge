@@ -83,8 +83,9 @@ def draw(kpts, size=512, frame=None):
 
 
 def render(kpts, path, fps, size=512, fixed=True):
+    """Write skeleton guide as browser-playable H.264 mp4."""
+    from pipeline.spring_time_remap import write_video
+
     frame = frame_fixed(kpts) if fixed else None
-    w = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (size, size))
-    for i in range(kpts.shape[0]):
-        w.write(draw(kpts[i, :N_JOINTS], size, frame))
-    w.release()
+    frames = [draw(kpts[i, :N_JOINTS], size, frame) for i in range(kpts.shape[0])]
+    write_video(path, frames, float(fps))

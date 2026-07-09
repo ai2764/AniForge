@@ -19,6 +19,17 @@ def test_parse_form_pose_mode():
     assert d["pose_mode"] == "standing"
 
 
+def test_parse_form_scale():
+    d = parse_generate_form({"action_prompt": "wave"})
+    assert d["scale"] == 1.0
+    d = parse_generate_form({"action_prompt": "wave", "scale": "0.5"})
+    assert d["scale"] == 0.5
+    d = parse_generate_form({"action_prompt": "wave", "scale": "2"})
+    assert d["scale"] == 1.0
+    d = parse_generate_form({"action_prompt": "wave", "scale": "0.1"})
+    assert d["scale"] == 0.25
+
+
 def test_required_nodes_check():
     assert required_nodes_present({"Kimodo_Sampler": {}, "WanSCAILToVideo": {}})
     assert not required_nodes_present({"Kimodo_Sampler": {}})

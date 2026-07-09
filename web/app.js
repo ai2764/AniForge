@@ -1,38 +1,131 @@
 (() => {
-  const form = document.getElementById("generate-form");
+  const form = document.getElementById("setup-form");
   const imageInput = document.getElementById("image-input");
   const dropZone = document.getElementById("drop-zone");
   const dropZoneText = document.getElementById("drop-zone-text");
   const dropZonePreview = document.getElementById("drop-zone-preview");
   const statusEl = document.getElementById("status");
   const errorsEl = document.getElementById("errors");
+
+  const btnCreate = document.getElementById("btn-create-session");
+  const btnRunAll = document.getElementById("btn-run-all");
+  const btnExtract = document.getElementById("btn-extract");
+  const btnIdle = document.getElementById("btn-idle");
+  const btnAction = document.getElementById("btn-action");
+  const btnJoint = document.getElementById("btn-joint");
+  const btnScailIdle = document.getElementById("btn-scail-idle");
+  const btnScailAction = document.getElementById("btn-scail-action");
+  const btnTime = document.getElementById("btn-time");
+  const btnBgremove = document.getElementById("btn-bgremove");
+  const chkJoint = document.getElementById("overshoot-joint");
+  const chkTime = document.getElementById("overshoot-time");
+  const chkBgIdle = document.getElementById("bgremove_idle");
+  const chkBgAction = document.getElementById("bgremove_action");
+  const bgModelSel = document.getElementById("bgremove_model");
+
+  const secExtract = document.getElementById("sec-extract");
+  const secIdle = document.getElementById("sec-idle");
+  const secAction = document.getElementById("sec-action");
+  const secScail = document.getElementById("sec-scail");
+  const secTime = document.getElementById("sec-time");
+  const secPlay = document.getElementById("sec-play");
+  const secBgremove = document.getElementById("sec-bgremove");
+
+  const badgeExtract = document.getElementById("badge-extract");
+  const badgeIdle = document.getElementById("badge-idle");
+  const badgeAction = document.getElementById("badge-action");
+  const badgeScail = document.getElementById("badge-scail");
+  const badgeScailIdle = document.getElementById("badge-scail-idle");
+  const badgeScailAction = document.getElementById("badge-scail-action");
+  const badgeTime = document.getElementById("badge-time");
+  const badgePlay = document.getElementById("badge-play");
+  const badgeBgremove = document.getElementById("badge-bgremove");
+
+  const imgExtract = document.getElementById("img-extract");
+  const boxExtract = document.getElementById("box-extract");
+  const vidIdleSkel = document.getElementById("vid-idle-skel");
+  const imgIdleSkel = document.getElementById("img-idle-skel");
+  const boxIdleSkel = document.getElementById("box-idle-skel");
+  const vidIdleVideo = document.getElementById("vid-idle-video");
+  const boxIdleVideo = document.getElementById("box-idle-video");
+  const vidActionSkel = document.getElementById("vid-action-skel");
+  const imgActionSkel = document.getElementById("img-action-skel");
+  const boxActionSkel = document.getElementById("box-action-skel");
+  const vidActionVideo = document.getElementById("vid-action-video");
+  const boxActionVideo = document.getElementById("box-action-video");
+  const vidTimeVideo = document.getElementById("vid-time-video");
+  const boxTimeVideo = document.getElementById("box-time-video");
+  const vidIdleNobg = document.getElementById("vid-idle-nobg");
+  const boxIdleNobg = document.getElementById("box-idle-nobg");
+  const vidActionNobg = document.getElementById("vid-action-nobg");
+  const boxActionNobg = document.getElementById("box-action-nobg");
+  const vidUploadNobg = document.getElementById("vid-upload-nobg");
+  const boxUploadNobg = document.getElementById("box-upload-nobg");
+  const bgremoveLinks = document.getElementById("bgremove-links");
+  const bgVideoInput = document.getElementById("bgremove-video");
+  const bgVideoName = document.getElementById("bgremove-video-name");
+
   const preview = document.getElementById("preview");
   const idleVideo = document.getElementById("idleVideo");
   const actionVideo = document.getElementById("actionVideo");
 
+  let runId = null;
   let hasAction = false;
+  let idleSkelReady = false;
+  let actionSkelReady = false;
+  let idleScailReady = false;
+  let actionScailReady = false;
+  let busy = false;
+  let imageNatural = null; // { w, h } from selected file
 
   const POSE_HINTS = {
-    standing: "Standing: free motion from prompts (no pose pin).",
-    sitting: "Sitting: pin pelvis + feet from the image; upper body free.",
-    lying: "Lying: full skeleton lock to the image pose (small motion only).",
+    standing:
+      "Standing: extract still from image; Kimodo idle/action is free (no pin) so prompts produce different motion.",
+    sitting:
+      "Sitting: extract pose from image, pin hips for idle/action (keeps seated root; limbs free).",
+    lying:
+      "Lying: extract pose from image, pin hips for idle/action (keeps lying root; limbs free).",
   };
   const poseHint = document.getElementById("pose-hint");
-  const jointOvershoot = document.getElementById("overshoot-joint");
 
   function selectedPoseMode() {
     const el = form.querySelector('input[name="pose_mode"]:checked');
     return el ? el.value : "standing";
   }
 
+  function jointChecked() {
+    return !!(chkJoint && chkJoint.checked);
+  }
+  function timeChecked() {
+    return !!(chkTime && chkTime.checked);
+  }
+
+  function showActionSkel(data) {
+    const actionSkelUrl =
+      data.skeleton ||
+      (data.skeleton_png ? String(data.skeleton_png).replace(/\.png(\?.*)?$/i, ".mp4") : null);
+    if (actionSkelUrl || data.skeleton_png) {
+      showVideo(
+        boxActionSkel,
+        vidActionSkel,
+        actionSkelUrl,
+        data.skeleton_png,
+        imgActionSkel,
+        true
+      );
+    }
+  }
+
   function syncPoseUi() {
     const mode = selectedPoseMode();
     if (poseHint) poseHint.textContent = POSE_HINTS[mode] || POSE_HINTS.standing;
-    // Joint overshoot is SOMA/standing-path only.
-    if (jointOvershoot) {
-      const standing = mode === "standing";
-      jointOvershoot.disabled = !standing;
-      if (!standing) jointOvershoot.checked = false;
+    const extractHint = document.getElementById("extract-hint");
+    if (extractHint) {
+      const mode = selectedPoseMode();
+      extractHint.textContent =
+        mode === "standing"
+          ? "HMR still from the image (preview only). Standing idle/action use free Kimodo — no pose pin."
+          : "HMR pose from the image, pin hips for Kimodo (limbs free). Review still before Idle.";
     }
   }
 
@@ -41,18 +134,124 @@
   });
   syncPoseUi();
 
-  // -- image picker (click or drag) --------------------------------------
-  dropZone.addEventListener("click", () => imageInput.click());
+  const scaleInput = document.getElementById("output_scale");
+  const scaleLabel = document.getElementById("output_scale_label");
+  const sizeReadout = document.getElementById("size-readout");
+  const idleKeepInput = document.getElementById("idle_motion_keep");
+  const idleKeepLabel = document.getElementById("idle_motion_keep_label");
+  const actionKeepInput = document.getElementById("action_motion_keep");
+  const actionKeepLabel = document.getElementById("action_motion_keep_label");
+  const actionDurInput = document.getElementById("action_duration");
+  const actionDurLabel = document.getElementById("action_duration_label");
 
+  function idleMotionKeepValue() {
+    if (!idleKeepInput) return 0.06;
+    let k = parseFloat(idleKeepInput.value);
+    if (!(k >= 0)) k = 0.06;
+    return Math.max(0, Math.min(1, k));
+  }
+
+  function actionMotionKeepValue() {
+    if (!actionKeepInput) return 1;
+    let k = parseFloat(actionKeepInput.value);
+    if (!(k >= 0)) k = 1;
+    return Math.max(0, Math.min(1, k));
+  }
+
+  function actionDurationValue() {
+    if (!actionDurInput) return 2;
+    let d = parseFloat(actionDurInput.value);
+    if (!(d > 0)) d = 2;
+    return Math.max(1, Math.min(3, d));
+  }
+
+  function syncIdleKeepLabel() {
+    if (!idleKeepInput || !idleKeepLabel) return;
+    idleKeepLabel.textContent = Math.round(idleMotionKeepValue() * 100) + "%";
+  }
+  function syncActionKeepLabel() {
+    if (!actionKeepInput || !actionKeepLabel) return;
+    actionKeepLabel.textContent = Math.round(actionMotionKeepValue() * 100) + "%";
+  }
+  function syncActionDurLabel() {
+    if (!actionDurInput || !actionDurLabel) return;
+    actionDurLabel.textContent = actionDurationValue().toFixed(1) + "s";
+  }
+  if (idleKeepInput) {
+    idleKeepInput.addEventListener("input", syncIdleKeepLabel);
+    syncIdleKeepLabel();
+  }
+  if (actionKeepInput) {
+    actionKeepInput.addEventListener("input", syncActionKeepLabel);
+    syncActionKeepLabel();
+  }
+  if (actionDurInput) {
+    actionDurInput.addEventListener("input", syncActionDurLabel);
+    syncActionDurLabel();
+  }
+
+  // Mirror pipeline.generate._output_size (long_cap=1280, short_cap=720, mult=16)
+  function computeOutputSize(w, h, scale) {
+    const longCap = 1280;
+    const shortCap = 720;
+    const mult = 16;
+    let s = parseFloat(scale);
+    if (!(s > 0)) s = 1;
+    s = Math.max(0.25, Math.min(1, s));
+    const fit = Math.min(longCap / Math.max(w, h), shortCap / Math.min(w, h)) * s;
+    const r = (v) => Math.max(mult, Math.round((v * fit) / mult) * mult);
+    return { w: r(w), h: r(h) };
+  }
+
+  function updateSizeReadout(serverSize) {
+    if (!sizeReadout) return;
+    if (!imageNatural) {
+      sizeReadout.textContent = "Image: —  →  Video: —";
+      return;
+    }
+    const iw = imageNatural.w;
+    const ih = imageNatural.h;
+    const scale = scaleInput ? scaleInput.value : 1;
+    const out = serverSize
+      ? { w: serverSize[0], h: serverSize[1] }
+      : computeOutputSize(iw, ih, scale);
+    const arImg = (iw / ih).toFixed(3);
+    const arOut = (out.w / out.h).toFixed(3);
+    sizeReadout.textContent =
+      "Image: " +
+      iw +
+      "×" +
+      ih +
+      " (AR " +
+      arImg +
+      ")  →  Video: " +
+      out.w +
+      "×" +
+      out.h +
+      " (AR " +
+      arOut +
+      ", scale " +
+      Math.round(parseFloat(scale) * 100) +
+      "%)";
+  }
+
+  function syncScaleLabel() {
+    if (!scaleInput || !scaleLabel) return;
+    scaleLabel.textContent = Math.round(parseFloat(scaleInput.value) * 100) + "%";
+    updateSizeReadout();
+  }
+  if (scaleInput) {
+    scaleInput.addEventListener("input", syncScaleLabel);
+    syncScaleLabel();
+  }
+
+  // -- image picker -------------------------------------------------------
+  dropZone.addEventListener("click", () => imageInput.click());
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
   });
-
-  dropZone.addEventListener("dragleave", () => {
-    dropZone.classList.remove("dragover");
-  });
-
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
   dropZone.addEventListener("drop", (e) => {
     e.preventDefault();
     dropZone.classList.remove("dragover");
@@ -62,7 +261,6 @@
       showImagePreview(file);
     }
   });
-
   imageInput.addEventListener("change", () => {
     const file = imageInput.files && imageInput.files[0];
     if (file) showImagePreview(file);
@@ -70,81 +268,818 @@
 
   function showImagePreview(file) {
     const url = URL.createObjectURL(file);
+    dropZonePreview.onload = () => {
+      imageNatural = {
+        w: dropZonePreview.naturalWidth,
+        h: dropZonePreview.naturalHeight,
+      };
+      updateSizeReadout();
+    };
     dropZonePreview.src = url;
     dropZonePreview.style.display = "block";
     dropZoneText.textContent = file.name;
     dropZone.classList.add("has-image");
   }
 
-  // -- submit --------------------------------------------------------------
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    errorsEl.textContent = "";
+  // -- section helpers ----------------------------------------------------
+  function setBadge(el, text, cls) {
+    el.textContent = text;
+    el.className = "badge" + (cls ? " " + cls : "");
+  }
 
-    if (!imageInput.files || !imageInput.files[0]) {
-      statusEl.textContent = "Please choose an image.";
-      return;
-    }
+  function unlock(section, badge, label) {
+    section.classList.remove("locked");
+    setBadge(badge, label || "ready", "");
+  }
 
-    const formData = new FormData();
-    formData.append("image", imageInput.files[0]);
-    formData.append("action_prompt", document.getElementById("action_prompt").value);
-    formData.append("idle_prompt", document.getElementById("idle_prompt").value);
-    formData.append("pose_mode", selectedPoseMode());
-    for (const box of form.querySelectorAll('input[name="overshoot"]:checked')) {
-      formData.append("overshoot", box.value);
-    }
-    const seedValue = document.getElementById("seed").value.trim();
-    if (seedValue !== "") {
-      formData.append("seed", seedValue);
-    }
+  function lock(section, badge, label) {
+    section.classList.add("locked");
+    setBadge(badge, label || "locked", "");
+  }
 
-    const mode = selectedPoseMode();
-    statusEl.textContent =
-      mode === "standing" ? "Generating..." : "Generating (" + mode + ", pose-anchored)...";
-    hasAction = false;
-    preview.classList.remove("has-action");
-    actionVideo.pause();
-    actionVideo.style.display = "none";
+  function bust(url) {
+    if (!url) return url;
+    return url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+  }
 
-    try {
-      const res = await fetch("/generate", { method: "POST", body: formData });
-      const data = await res.json();
+  /** Static still only (extract pose). */
+  function showStill(box, imgEl, pngUrl) {
+    if (!box || !imgEl || !pngUrl) return;
+    box.classList.add("show");
+    imgEl.src = bust(pngUrl);
+    imgEl.style.display = "block";
+  }
 
-      if (data.idle) {
-        idleVideo.src = data.idle;
-        idleVideo.style.display = "block";
-        idleVideo.play();
-      }
+  /**
+   * Motion review: prefer looping video; PNG as fallback if video fails.
+   * @param {boolean} motion - if true, show playable video for skeleton animation
+   */
+  function showVideo(box, video, url, pngUrl, imgEl, motion) {
+    if (!url && !pngUrl) return;
+    box.classList.add("show");
+    const wantMotion = motion !== false;
 
-      if (data.action) {
-        actionVideo.src = data.action;
-        actionVideo.load();
-        hasAction = true;
-        preview.classList.add("has-action");
-      }
-
-      if (data.idle || data.action) {
-        preview.style.display = "block";
-      }
-
-      if (data.errors && Object.keys(data.errors).length > 0) {
-        errorsEl.textContent = JSON.stringify(data.errors, null, 2);
-      }
-
-      if (data.seed !== undefined && data.seed !== null) {
-        document.getElementById("seed").value = data.seed;
-        statusEl.textContent = "Done. (seed " + data.seed + ")";
+    if (imgEl) {
+      if (pngUrl && (!wantMotion || !url)) {
+        imgEl.src = bust(pngUrl);
+        imgEl.style.display = "block";
+      } else if (pngUrl && wantMotion) {
+        // keep still as poster-like fallback under video
+        imgEl.src = bust(pngUrl);
+        imgEl.style.display = "none";
       } else {
-        statusEl.textContent = "Done.";
+        imgEl.style.display = "none";
       }
-    } catch (err) {
-      statusEl.textContent = "Request failed.";
-      errorsEl.textContent = String(err);
+    }
+
+    if (video && url && wantMotion) {
+      video.style.display = "block";
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.controls = true;
+      video.src = bust(url);
+      video.load();
+      // Prefer video always; only fall back to PNG if the file/codec fails.
+      // Do not hide video on autoplay policy rejection — controls remain usable.
+      video.play().catch(() => {});
+      video.onerror = () => {
+        if (imgEl && pngUrl) {
+          video.style.display = "none";
+          imgEl.style.display = "block";
+        }
+      };
+    } else if (video) {
+      video.removeAttribute("src");
+      video.style.display = "none";
+    }
+  }
+
+  function setBusy(on, msg) {
+    busy = on;
+    btnCreate.disabled = on;
+    if (btnRunAll) btnRunAll.disabled = on;
+    btnExtract.disabled = on || !runId;
+    btnIdle.disabled = on || !runId || secIdle.classList.contains("locked");
+    btnAction.disabled = on || !runId || secAction.classList.contains("locked");
+    if (btnJoint) {
+      btnJoint.disabled = on || !runId || !actionSkelReady;
+    }
+    if (btnScailIdle) {
+      btnScailIdle.disabled = on || !runId || !idleSkelReady;
+    }
+    if (btnScailAction) {
+      btnScailAction.disabled = on || !runId || !actionSkelReady;
+    }
+    if (btnTime) {
+      btnTime.disabled = on || !runId || !actionScailReady;
+    }
+    if (btnBgremove) {
+      // Always available: upload and/or session videos (no pipeline lock).
+      btnBgremove.disabled = on;
+    }
+    if (msg !== undefined) statusEl.textContent = msg;
+  }
+
+  function fail(err) {
+    errorsEl.textContent = typeof err === "string" ? err : JSON.stringify(err, null, 2);
+  }
+
+  function clearErrors() {
+    errorsEl.textContent = "";
+  }
+
+  async function postForm(url, formData) {
+    const res = await fetch(url, { method: "POST", body: formData });
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (_) {
+      data = { error: text || res.statusText, raw: true };
+    }
+    if (!res.ok) {
+      const msg =
+        data.error ||
+        data.errors ||
+        (Object.keys(data).length ? data : null) ||
+        (res.status + " " + (res.statusText || "error") + (text ? ": " + text.slice(0, 200) : ""));
+      throw msg;
+    }
+    if (data.errors && Object.keys(data.errors).length) {
+      throw data.errors;
+    }
+    return data;
+  }
+
+  function resetDownstreamUi() {
+    hasAction = false;
+    idleSkelReady = false;
+    actionSkelReady = false;
+    idleScailReady = false;
+    actionScailReady = false;
+    preview.style.display = "none";
+    preview.classList.remove("has-action");
+    [boxExtract, boxIdleSkel, boxIdleVideo, boxActionSkel, boxActionVideo, boxTimeVideo].forEach(
+      (b) => {
+        if (b) b.classList.remove("show");
+      }
+    );
+    lock(secIdle, badgeIdle, "locked");
+    lock(secAction, badgeAction, "locked");
+    if (secScail && badgeScail) lock(secScail, badgeScail, "locked");
+    if (badgeScailIdle) setBadge(badgeScailIdle, "locked", "");
+    if (badgeScailAction) setBadge(badgeScailAction, "locked", "");
+    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
+    lock(secPlay, badgePlay, "locked");
+    if (btnJoint) btnJoint.disabled = true;
+    if (btnScailIdle) btnScailIdle.disabled = true;
+    if (btnScailAction) btnScailAction.disabled = true;
+    if (btnTime) btnTime.disabled = true;
+    // BG remove stays available (upload and/or session files)
+    if (secBgremove) secBgremove.classList.remove("locked");
+    if (badgeBgremove) setBadge(badgeBgremove, "ready", "");
+    if (btnBgremove) btnBgremove.disabled = false;
+    [boxIdleNobg, boxActionNobg, boxUploadNobg].forEach((b) => {
+      if (b) b.classList.remove("show");
+    });
+    if (bgremoveLinks) bgremoveLinks.innerHTML = "";
+  }
+
+  function refreshPlayerUnlock() {
+    if (idleScailReady || actionScailReady) {
+      if (secPlay && badgePlay) unlock(secPlay, badgePlay, "ready");
+    }
+    if (actionScailReady) {
+      if (secTime && badgeTime) {
+        unlock(secTime, badgeTime, "ready");
+        if (btnTime) btnTime.disabled = false;
+      }
+    }
+    if (idleScailReady && actionScailReady && badgeScail) {
+      setBadge(badgeScail, "done", "done");
+    } else if (idleScailReady || actionScailReady) {
+      if (badgeScail) setBadge(badgeScail, "partial", "");
+    }
+  }
+
+  // BG remove always ready
+  if (secBgremove) secBgremove.classList.remove("locked");
+  if (badgeBgremove) setBadge(badgeBgremove, "ready", "");
+  if (btnBgremove) btnBgremove.disabled = false;
+  if (bgVideoInput) {
+    bgVideoInput.addEventListener("change", () => {
+      const f = bgVideoInput.files && bgVideoInput.files[0];
+      if (bgVideoName) {
+        bgVideoName.textContent = f
+          ? f.name + " (" + Math.round(f.size / 1024) + " KB)"
+          : "No file chosen — will use session idle/action if checked.";
+      }
+    });
+  }
+
+  function applyActionToPlayer(actionUrl, idleUrl) {
+    if (idleUrl) {
+      showVideo(boxIdleVideo, vidIdleVideo, idleUrl);
+      idleVideo.src = bust(idleUrl);
+      idleVideo.style.display = "block";
+      preview.style.display = "block";
+      idleVideo.play().catch(() => {});
+    }
+    if (actionUrl) {
+      const url = bust(actionUrl);
+      showVideo(boxActionVideo, vidActionVideo, actionUrl);
+      if (boxTimeVideo && vidTimeVideo) {
+        showVideo(boxTimeVideo, vidTimeVideo, actionUrl);
+      }
+      // Hard reset so a previous MEDIA_ERR does not stick after time-overshoot.
+      actionVideo.pause();
+      actionVideo.removeAttribute("src");
+      actionVideo.load();
+      actionVideo.muted = true;
+      actionVideo.playsInline = true;
+      actionVideo.src = url;
+      actionVideo.load();
+      actionVideo.onerror = () => {
+        const code = actionVideo.error ? actionVideo.error.code : "?";
+        errorsEl.textContent =
+          "Action video failed to load (media error " +
+          code +
+          "). URL: " +
+          url +
+          " — hard-refresh or re-run time overshoot.";
+      };
+      actionVideo.onloadeddata = () => {
+        // clear sticky error message if reload succeeded
+        if (errorsEl.textContent && errorsEl.textContent.indexOf("Action video") === 0) {
+          errorsEl.textContent = "";
+        }
+      };
+      hasAction = true;
+      preview.classList.add("has-action");
+      preview.style.display = "block";
+    }
+  }
+
+  /** @returns {Promise<object>} session data */
+  async function doCreateSession() {
+    if (!imageInput.files || !imageInput.files[0]) {
+      throw "Please choose an image.";
+    }
+    const fd = new FormData();
+    fd.append("image", imageInput.files[0]);
+    fd.append("pose_mode", selectedPoseMode());
+    if (scaleInput) fd.append("scale", scaleInput.value);
+    const seedValue = document.getElementById("seed").value.trim();
+    if (seedValue !== "") fd.append("seed", seedValue);
+
+    const data = await postForm("/session", fd);
+    runId = data.run_id;
+    if (data.seed !== undefined && data.seed !== null) {
+      document.getElementById("seed").value = data.seed;
+    }
+    if (data.size) updateSizeReadout(data.size);
+    resetDownstreamUi();
+    unlock(secExtract, badgeExtract, "ready");
+    btnExtract.disabled = false;
+    return data;
+  }
+
+  /** @returns {Promise<object>} */
+  async function doExtract() {
+    if (!runId) throw "No session — create session first.";
+    setBadge(badgeExtract, "running", "running");
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    const data = await postForm("/session/extract", fd);
+    if (data.skipped) {
+      setBadge(badgeExtract, "skipped", "done");
+    } else {
+      setBadge(badgeExtract, "done", "done");
+      // Extract: still image only (no video player)
+      const still =
+        data.skeleton_png ||
+        (data.skeleton ? String(data.skeleton).replace(/\.mp4(\?.*)?$/i, ".png") : null);
+      if (still) showStill(boxExtract, imgExtract, still);
+    }
+    unlock(secIdle, badgeIdle, "ready");
+    btnIdle.disabled = false;
+    // Action does not depend on idle — unlock as soon as extract is ready.
+    unlock(secAction, badgeAction, "ready");
+    btnAction.disabled = false;
+    return data;
+  }
+
+  /** @returns {Promise<object>} idle skeleton only */
+  async function doIdle() {
+    if (!runId) throw "No session.";
+    setBadge(badgeIdle, "running", "running");
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    fd.append("idle_prompt", document.getElementById("idle_prompt").value);
+    fd.append("idle_motion_keep", String(idleMotionKeepValue()));
+    const data = await postForm("/session/idle", fd);
+    setBadge(badgeIdle, "done", "done");
+    idleSkelReady = true;
+    idleScailReady = false; // skeleton changed — re-run SCAIL idle
+    if (badgeScailIdle) setBadge(badgeScailIdle, "ready", "");
+    // Idle motion review: looping skeleton video (not still).
+    const idleSkelUrl =
+      data.skeleton ||
+      (data.skeleton_png ? String(data.skeleton_png).replace(/\.png(\?.*)?$/i, ".mp4") : null);
+    if (idleSkelUrl || data.skeleton_png) {
+      showVideo(boxIdleSkel, vidIdleSkel, idleSkelUrl, data.skeleton_png, imgIdleSkel, true);
+    }
+    // Action may already be unlocked after extract; keep it ready.
+    if (secAction && badgeAction) {
+      unlock(secAction, badgeAction, "ready");
+      btnAction.disabled = false;
+    }
+    unlockScailSection();
+    if (btnScailIdle) {
+      btnScailIdle.disabled = false;
+      if (badgeScailIdle) setBadge(badgeScailIdle, "ready", "");
+    }
+    return data;
+  }
+
+  /** @returns {Promise<object>} action skeleton only */
+  async function doAction() {
+    if (!runId) throw "No session.";
+    const actionPrompt = document.getElementById("action_prompt").value.trim();
+    if (!actionPrompt) throw "Action prompt is required.";
+    setBadge(badgeAction, "running", "running");
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    fd.append("action_prompt", actionPrompt);
+    fd.append("action_motion_keep", String(actionMotionKeepValue()));
+    fd.append("action_duration", String(actionDurationValue()));
+    const data = await postForm("/session/action", fd);
+    setBadge(badgeAction, "done", "done");
+    showActionSkel(data);
+    actionSkelReady = true;
+    actionScailReady = false; // skeleton changed — need SCAIL action again
+    if (btnJoint) btnJoint.disabled = false;
+    unlockScailSection();
+    if (btnScailAction) {
+      btnScailAction.disabled = false;
+      if (badgeScailAction) setBadge(badgeScailAction, "ready", "");
+    }
+    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
+    return data;
+  }
+
+  /** Unlock SCAIL section when either skeleton is ready. */
+  function unlockScailSection() {
+    if ((idleSkelReady || actionSkelReady) && secScail && badgeScail) {
+      unlock(secScail, badgeScail, "ready");
+    }
+  }
+
+  /** Joint spring on action skeleton (before SCAIL). */
+  async function doJointOvershoot() {
+    if (!runId) throw "No session.";
+    if (!actionSkelReady) throw "Run action skeleton first.";
+    setBadge(badgeAction, "running", "running");
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    const data = await postForm("/session/joint-overshoot", fd);
+    setBadge(badgeAction, "joint ok", "done");
+    showActionSkel(data);
+    actionScailReady = false;
+    unlockScailSection();
+    if (btnScailAction) {
+      btnScailAction.disabled = false;
+      if (badgeScailAction) setBadge(badgeScailAction, "ready", "");
+    }
+    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
+    if (btnTime) btnTime.disabled = true;
+    return data;
+  }
+
+  /** @param {"idle"|"action"|"both"} which */
+  async function doScail(which) {
+    if (!runId) throw "No session.";
+    which = which || "both";
+    if (which === "idle" && !idleSkelReady) throw "Run idle skeleton first.";
+    if (which === "action" && !actionSkelReady) throw "Run action skeleton first.";
+    if (which === "both" && (!idleSkelReady || !actionSkelReady)) {
+      throw "Need idle and action skeleton before SCAIL both.";
+    }
+
+    const badge =
+      which === "idle" ? badgeScailIdle : which === "action" ? badgeScailAction : badgeScail;
+    if (badge) setBadge(badge, "running", "running");
+    if (badgeScail) setBadge(badgeScail, "running", "running");
+
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    fd.append("which", which);
+    const data = await postForm("/session/scail", fd);
+
+    if (which === "idle" || which === "both") {
+      if (data.idle) {
+        idleScailReady = true;
+        if (badgeScailIdle) setBadge(badgeScailIdle, "done", "done");
+      }
+    }
+    if (which === "action" || which === "both") {
+      if (data.action) {
+        actionScailReady = true;
+        if (badgeScailAction) setBadge(badgeScailAction, "done", "done");
+      }
+    }
+    if (data.idle_scail_done) idleScailReady = true;
+    if (data.action_scail_done) actionScailReady = true;
+
+    applyActionToPlayer(data.action, data.idle);
+    refreshPlayerUnlock();
+    return data;
+  }
+
+  /** Time spring remap on final action character video. */
+  async function doTimeOvershoot() {
+    if (!runId) throw "No session.";
+    if (!actionScailReady) throw "Run SCAIL action first.";
+    if (badgeTime) setBadge(badgeTime, "running", "running");
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    const data = await postForm("/session/time-overshoot", fd);
+    if (badgeTime) setBadge(badgeTime, "done", "done");
+    applyActionToPlayer(data.action, data.idle);
+    unlock(secPlay, badgePlay, "ready");
+    return data;
+  }
+
+  function bgremoveWhich() {
+    const idle = chkBgIdle && chkBgIdle.checked;
+    const act = chkBgAction && chkBgAction.checked;
+    const hasFile = bgVideoInput && bgVideoInput.files && bgVideoInput.files[0];
+    if (!idle && !act && !hasFile) {
+      throw "Import a video, or check session idle/action.";
+    }
+    if (idle && act) return "both";
+    if (idle) return "idle";
+    if (act) return "action";
+    // upload only
+    return "both"; // session flags none; upload handled separately
+  }
+
+  async function doBgremove() {
+    const hasFile = bgVideoInput && bgVideoInput.files && bgVideoInput.files[0];
+    const idle = chkBgIdle && chkBgIdle.checked;
+    const act = chkBgAction && chkBgAction.checked;
+    if (!hasFile && !idle && !act) {
+      throw "Import a video file, and/or check session idle/action.";
+    }
+    let which = "both";
+    if (idle && act) which = "both";
+    else if (idle) which = "idle";
+    else if (act) which = "action";
+    else which = "upload";
+
+    if (badgeBgremove) setBadge(badgeBgremove, "running", "running");
+    const fd = new FormData();
+    if (runId) fd.append("run_id", runId);
+    fd.append("which", which);
+    if (bgModelSel) fd.append("model", bgModelSel.value);
+    if (hasFile) fd.append("video", bgVideoInput.files[0]);
+
+    const res = await fetch("/session/bgremove", { method: "POST", body: fd });
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (_) {
+      data = { error: text || res.statusText };
+    }
+    if (data.run_id && !runId) {
+      runId = data.run_id;
+    }
+    const hasOut =
+      data.idle_nobg ||
+      data.action_nobg ||
+      data.upload_nobg ||
+      data.idle_nobg_webm ||
+      data.action_nobg_webm ||
+      data.upload_nobg_webm;
+    if (!res.ok && !hasOut) {
+      throw data.error || data.errors || data;
+    }
+    if (data.errors && Object.keys(data.errors).length && hasOut) {
+      errorsEl.textContent = JSON.stringify(data.errors, null, 2);
+    } else if (data.errors && Object.keys(data.errors).length && !hasOut) {
+      throw data.errors;
+    }
+    if (badgeBgremove) setBadge(badgeBgremove, "done", "done");
+    if (data.upload_nobg) {
+      showVideo(boxUploadNobg, vidUploadNobg, data.upload_nobg);
+    }
+    if (data.idle_nobg) {
+      showVideo(boxIdleNobg, vidIdleNobg, data.idle_nobg);
+    }
+    if (data.action_nobg) {
+      showVideo(boxActionNobg, vidActionNobg, data.action_nobg);
+    }
+    applyActionToPlayer(
+      data.action_nobg || data.upload_nobg || data.action,
+      data.idle_nobg || data.idle
+    );
+    const links = [];
+    [
+      ["upload_nobg_webm", "upload_nobg.webm"],
+      ["idle_nobg_webm", "idle_nobg.webm"],
+      ["action_nobg_webm", "action_nobg.webm"],
+      ["upload_nobg", "upload_nobg.mp4"],
+      ["idle_nobg", "idle_nobg.mp4"],
+      ["action_nobg", "action_nobg.mp4"],
+    ].forEach(([key, name]) => {
+      if (data[key]) {
+        links.push('<a href="' + data[key] + '" download>' + name + "</a>");
+      }
+    });
+    if (bgremoveLinks) bgremoveLinks.innerHTML = links.join(" · ");
+    unlock(secPlay, badgePlay, "ready");
+    return data;
+  }
+
+  // -- 1 create session ---------------------------------------------------
+  btnCreate.addEventListener("click", async () => {
+    if (busy) return;
+    clearErrors();
+    setBusy(true, "Creating session...");
+    try {
+      const data = await doCreateSession();
+      const sizeTxt = data.size ? data.size[0] + "×" + data.size[1] : "?";
+      statusEl.textContent =
+        "Session " + runId.slice(0, 8) + "… ready. Output " + sizeTxt + ". Run Extract or Run all.";
+    } catch (e) {
+      fail(e);
+      statusEl.textContent = "Session create failed.";
+    } finally {
+      setBusy(false);
+      btnExtract.disabled = !runId;
     }
   });
 
-  // -- click-triggered player ----------------------------------------------
+  // -- 2 extract ----------------------------------------------------------
+  btnExtract.addEventListener("click", async () => {
+    if (!runId || busy) return;
+    clearErrors();
+    setBusy(true, "Extracting skeleton...");
+    try {
+      const data = await doExtract();
+      statusEl.textContent =
+        (data.skipped ? "Extract skipped. " : "Extract done. Review skeleton, then Start idle. ") +
+        (data.constraint_joints ? "pin=" + JSON.stringify(data.constraint_joints) : "");
+    } catch (e) {
+      fail(e);
+      setBadge(badgeExtract, "error", "");
+      statusEl.textContent = "Extract failed.";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // -- 3 idle skeleton ----------------------------------------------------
+  btnIdle.addEventListener("click", async () => {
+    if (!runId || busy) return;
+    clearErrors();
+    setBusy(true, "Running idle skeleton motion (Kimodo)...");
+    try {
+      const data = await doIdle();
+      const stdB = data.motion_std_before != null ? Number(data.motion_std_before).toFixed(4) : "?";
+      const stdS = data.motion_std_source != null ? Number(data.motion_std_source).toFixed(4) : "?";
+      const stdA = data.motion_std != null ? Number(data.motion_std).toFixed(4) : "?";
+      const keepPct =
+        data.idle_motion_keep != null
+          ? Math.round(Number(data.idle_motion_keep) * 100) + "%"
+          : Math.round(idleMotionKeepValue() * 100) + "%";
+      const anchor = data.idle_anchored_to_extract ? "extract@100%" : "frame0";
+      statusEl.textContent =
+        "Idle done (amount=" +
+        keepPct +
+        ", " +
+        anchor +
+        ", raw→src→out " +
+        stdB +
+        "→" +
+        stdS +
+        "→" +
+        stdA +
+        "). Review video, then action.";
+    } catch (e) {
+      fail(e);
+      setBadge(badgeIdle, "error", "");
+      statusEl.textContent = "Idle skeleton failed.";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  // -- 4 action skeleton --------------------------------------------------
+  btnAction.addEventListener("click", async () => {
+    if (!runId || busy) return;
+    clearErrors();
+    setBusy(true, "Running action skeleton motion (Kimodo)...");
+    try {
+      const act = await doAction();
+      const amt =
+        act.action_motion_keep != null
+          ? Math.round(Number(act.action_motion_keep) * 100) + "%"
+          : Math.round(actionMotionKeepValue() * 100) + "%";
+      const dur =
+        act.action_duration != null
+          ? Number(act.action_duration).toFixed(1) + "s"
+          : actionDurationValue().toFixed(1) + "s";
+      const f0 =
+        act.action_f0_err != null ? Number(act.action_f0_err).toFixed(5) : "?";
+      const up =
+        act.upper_motion_std != null
+          ? Number(act.upper_motion_std).toFixed(4)
+          : "?";
+      const std =
+        act.motion_std != null ? Number(act.motion_std).toFixed(4) : "?";
+      const lock = act.action_lock_lower ? " legsLocked" : "";
+      const msg =
+        "Action done (" +
+        dur +
+        ", amount=" +
+        amt +
+        ", f0_err=" +
+        f0 +
+        ", upper_std=" +
+        up +
+        ", std=" +
+        std +
+        lock +
+        ").";
+      if (jointChecked()) {
+        statusEl.textContent = msg + " Applying joint overshoot…";
+        await doJointOvershoot();
+        statusEl.textContent = "Joint overshoot applied. Review skeleton, then SCAIL2.";
+      } else {
+        statusEl.textContent = msg + " Optional joint, then SCAIL2.";
+      }
+    } catch (e) {
+      fail(e);
+      setBadge(badgeAction, "error", "");
+      statusEl.textContent = "Action skeleton failed.";
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  if (btnJoint) {
+    btnJoint.addEventListener("click", async () => {
+      if (!runId || busy) return;
+      clearErrors();
+      setBusy(true, "Joint overshoot on action skeleton…");
+      try {
+        await doJointOvershoot();
+        statusEl.textContent = "Joint overshoot applied to skeleton. Re-run SCAIL2 to update character.";
+      } catch (e) {
+        fail(e);
+        setBadge(badgeAction, "error", "");
+        statusEl.textContent = "Joint overshoot failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- 5 SCAIL2 character (idle / action separate) ------------------------
+  if (btnScailIdle) {
+    btnScailIdle.addEventListener("click", async () => {
+      if (!runId || busy) return;
+      clearErrors();
+      setBusy(true, "SCAIL2 idle: drive character with idle guide…");
+      try {
+        await doScail("idle");
+        statusEl.textContent = "SCAIL idle done. Action SCAIL can run when action skeleton is ready.";
+      } catch (e) {
+        fail(e);
+        if (badgeScailIdle) setBadge(badgeScailIdle, "error", "");
+        statusEl.textContent = "SCAIL idle failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+  if (btnScailAction) {
+    btnScailAction.addEventListener("click", async () => {
+      if (!runId || busy) return;
+      clearErrors();
+      setBusy(true, "SCAIL2 action: drive character with action guide…");
+      try {
+        await doScail("action");
+        if (timeChecked()) {
+          statusEl.textContent = "SCAIL action done. Applying time overshoot…";
+          await doTimeOvershoot();
+          statusEl.textContent = "Time overshoot applied. Use preview player.";
+        } else {
+          statusEl.textContent =
+            "SCAIL action done. Optional: time overshoot, or use preview player.";
+        }
+      } catch (e) {
+        fail(e);
+        if (badgeScailAction) setBadge(badgeScailAction, "error", "");
+        statusEl.textContent = "SCAIL action failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- 6 time overshoot on final action video -----------------------------
+  if (btnTime) {
+    btnTime.addEventListener("click", async () => {
+      if (!runId || busy) return;
+      clearErrors();
+      setBusy(true, "Time overshoot on action video…");
+      try {
+        await doTimeOvershoot();
+        statusEl.textContent = "Time overshoot applied. Preview player uses the timed clip.";
+      } catch (e) {
+        fail(e);
+        if (badgeTime) setBadge(badgeTime, "error", "");
+        statusEl.textContent = "Time overshoot failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- 8 background removal -----------------------------------------------
+  if (btnBgremove) {
+    btnBgremove.addEventListener("click", async () => {
+      if (!runId || busy) return;
+      clearErrors();
+      setBusy(true, "Background removal (videoBGremoval)… kill Comfy if VRAM is full.");
+      try {
+        await doBgremove();
+        statusEl.textContent =
+          "BG removal done. Preview uses no-bg mp4; download .webm for alpha.";
+      } catch (e) {
+        fail(e);
+        if (badgeBgremove) setBadge(badgeBgremove, "error", "");
+        statusEl.textContent = "Background removal failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- Run all ------------------------------------------------------------
+  if (btnRunAll) {
+    btnRunAll.addEventListener("click", async () => {
+      if (busy) return;
+      clearErrors();
+      if (!imageInput.files || !imageInput.files[0]) {
+        statusEl.textContent = "Please choose an image.";
+        return;
+      }
+      if (!document.getElementById("action_prompt").value.trim()) {
+        statusEl.textContent = "Action prompt is required for Run all.";
+        document.getElementById("action_prompt").focus();
+        return;
+      }
+      setBusy(true, "Run all: creating session...");
+      try {
+        const sess = await doCreateSession();
+        const sizeTxt = sess.size ? sess.size[0] + "×" + sess.size[1] : "?";
+        statusEl.textContent = "Run all: extract pose… (" + sizeTxt + ")";
+        await doExtract();
+        statusEl.textContent = "Run all: idle skeleton motion…";
+        await doIdle();
+        statusEl.textContent = "Run all: action skeleton motion…";
+        await doAction();
+        if (jointChecked()) {
+          statusEl.textContent = "Run all: joint overshoot on skeleton…";
+          await doJointOvershoot();
+        }
+        statusEl.textContent = "Run all: SCAIL idle…";
+        await doScail("idle");
+        statusEl.textContent = "Run all: SCAIL action…";
+        await doScail("action");
+        if (timeChecked()) {
+          statusEl.textContent = "Run all: time overshoot on action video…";
+          await doTimeOvershoot();
+        }
+        statusEl.textContent =
+          "Run all done. Session " +
+          (runId ? runId.slice(0, 8) + "…" : "") +
+          " — click preview to play action.";
+      } catch (e) {
+        fail(e);
+        statusEl.textContent = "Run all stopped with an error.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- click player -------------------------------------------------------
   function returnToIdle() {
     actionVideo.pause();
     actionVideo.style.display = "none";
@@ -154,34 +1089,39 @@
 
   preview.addEventListener("click", () => {
     if (!hasAction) return;
+    // If a prior load failed, try one reload before giving up.
     if (actionVideo.error) {
-      errorsEl.textContent = "Action video failed to load (unsupported or missing).";
-      return;
+      const src = actionVideo.currentSrc || actionVideo.src;
+      if (src) {
+        actionVideo.src = bust(src.split("?")[0]);
+        actionVideo.load();
+      }
     }
     idleVideo.pause();
     idleVideo.style.display = "none";
     actionVideo.style.display = "block";
-    try {
-      actionVideo.currentTime = 0;
-    } catch (_) {
-      /* ignore if metadata not ready yet */
-    }
-    const playPromise = actionVideo.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {
-        errorsEl.textContent = "Action video failed to play.";
-        returnToIdle();
-      });
+    const tryPlay = () => {
+      try {
+        actionVideo.currentTime = 0;
+      } catch (_) {}
+      const p = actionVideo.play();
+      if (p && p.catch) {
+        p.catch((err) => {
+          errorsEl.textContent =
+            "Action video failed to play: " +
+            (err && err.message ? err.message : String(err)) +
+            (actionVideo.error ? " (media " + actionVideo.error.code + ")" : "");
+          returnToIdle();
+        });
+      }
+    };
+    if (actionVideo.readyState >= 2) {
+      tryPlay();
+    } else {
+      actionVideo.addEventListener("loadeddata", tryPlay, { once: true });
+      actionVideo.load();
     }
   });
 
-  actionVideo.addEventListener("ended", () => {
-    returnToIdle();
-  });
-
-  actionVideo.addEventListener("error", () => {
-    if (hasAction) {
-      errorsEl.textContent = "Action video failed to load (unsupported or missing).";
-    }
-  });
+  actionVideo.addEventListener("ended", returnToIdle);
 })();

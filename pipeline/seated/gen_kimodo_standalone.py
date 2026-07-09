@@ -87,7 +87,11 @@ if arg1.suffix.lower() == ".json" and arg1.is_file():
 else:
     job = _legacy_job()
 
-CJSON = job["constraint_json"]
+# Empty / missing constraint_json => free text-to-motion (used for standing).
+_raw_cjson = job.get("constraint_json") or ""
+CJSON = str(_raw_cjson).strip() if _raw_cjson else ""
+if CJSON and not Path(CJSON).is_file():
+    sys.exit(f"constraint_json not found: {CJSON}")
 OUTDIR = Path(job.get("outdir") or r"C:/Users/AIBOX/dev/ComfyUI-scail/output")
 OUTDIR.mkdir(parents=True, exist_ok=True)
 SEED = int(job.get("seed") or 42)
@@ -103,21 +107,24 @@ print(
     flush=True,
 )
 print("VRAM after load:", vram(), flush=True)
+print(f"constraint: {CJSON or '(none — free motion)'}", flush=True)
 
 for item in JOBS:
     name = item["name"]
     prompt = item["prompt"]
-    seed_everything(SEED)
+    # Offset seed per clip name so idle/action with similar prompts still differ.
+    clip_seed = SEED + (1 if name == "action" else 0)
+    seed_everything(clip_seed)
     texts = sanitize_texts([prompt])
     nf = [int(DUR * model.fps)] * len(texts)
-    cons = load_constraints_lst(CJSON, model.skeleton)
+    cons = load_constraints_lst(CJSON, model.skeleton) if CJSON else []
     t1 = time.time()
     out = model(
         texts, nf,
         num_denoising_steps=STEPS,
         num_samples=1,
         multi_prompt=len(texts) > 1,
-        constraint_lst=cons,
+        constraint_lst=cons if cons else None,
         post_processing=False,
         return_numpy=True,
     )
@@ -125,9 +132,34 @@ for item in JOBS:
         k: (v[0] if hasattr(v, "shape") and v.ndim > 0 and v.shape[0] == 1 else v)
         for k, v in out.items()
     }
+    # Filename keeps session seed for stages to find; clip_seed only affects sampling.
     path = OUTDIR / f"{name}_seed{SEED}.npz"
     np.savez(path, **single)
     P = single["posed_joints"]
-    print(f"  {name}: gen {time.time()-t1:.0f}s -> {path}  posed_joints {P.shape}", flush=True)
+    motion = float(np.asarray(P).std(axis=0).mean())
+    print(
+        f"  {name}: gen {time.time()-t1:.0f}s seed={clip_seed} -> {path}  "
+        f"posed_joints {P.shape} motion_std={motion:.4f}",
+        flush=True,
+    )
 
 print("VRAM after both gens:", vram(), flush=True)
+
+# Force CUDA release before process exit (Windows often holds memory otherwise).
+try:
+    del model
+except Exception:
+    pass
+try:
+    import gc
+    import torch
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        # Some drivers need a second pass
+        gc.collect()
+        torch.cuda.empty_cache()
+    print("VRAM after explicit unload:", vram(), flush=True)
+except Exception as exc:
+    print(f"VRAM unload warning: {exc}", flush=True)

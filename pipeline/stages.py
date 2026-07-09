@@ -1,0 +1,984 @@
+"""Staged generation: extract skeleton → idle → action, with previews between steps.
+
+State lives in run_dir/meta.json + artifacts. Used by the stepwise UI.
+"""
+from __future__ import annotations
+
+import json
+import random
+import uuid
+from pathlib import Path
+
+import numpy as np
+
+from pipeline.comfy import ComfyClient
+from pipeline.generate import (
+    ACTION_DURATION_SEC,
+    ACTION_MOTION_KEEP,
+    DEFAULT_IDLE_PROMPT,
+    FPS,
+    IDLE_DURATION_SEC,
+    IDLE_MOTION_KEEP,
+    JOINT_SPRING,
+    SCAIL_ACTION_POSITIVE,
+    SCAIL_IDLE_POSITIVE,
+    TIME_SPRING,
+    _output_size,
+    _pad_to_aspect,
+    align_4k1,
+    align_motion_to_base_pose,
+    dampen_idle_joints,
+    ensure_mouth_still,
+    prepare_idle_source_motion,
+    plan_steps,
+    sanitize_action,
+)
+from pipeline.scail import drive_character
+from pipeline.seated.generate_anchored import (
+    HERE as SEATED_HERE,
+    _run_subprocess,
+    render_smplx_guide,
+    skeleton_camera_from_joints,
+)
+from pipeline.skeleton_spring import spring_follow
+from pipeline.spring_time_remap import time_remap_file
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RUNS_DIR = REPO_ROOT / "runs"
+META_NAME = "meta.json"
+
+
+def _load_meta(run_dir: Path) -> dict:
+    p = run_dir / META_NAME
+    if not p.is_file():
+        raise FileNotFoundError(f"missing session meta: {p}")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _save_meta(run_dir: Path, meta: dict) -> None:
+    (run_dir / META_NAME).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _rel_url(path: Path | None) -> str | None:
+    if path is None or not Path(path).is_file():
+        return None
+    rel = Path(path).resolve().relative_to(REPO_ROOT.resolve())
+    return "/" + rel.as_posix()
+
+
+def _find_image(run_dir: Path) -> Path:
+    for p in sorted(run_dir.glob("input.*")):
+        if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            return p
+    raise FileNotFoundError(f"no input image in {run_dir}")
+
+
+def create_session(
+    image_bytes: bytes,
+    filename: str,
+    *,
+    pose_mode: str = "standing",
+    seed: int | None = None,
+    scale: float = 1.0,
+    runs_dir: Path = RUNS_DIR,
+) -> dict:
+    pose_mode = (pose_mode or "standing").strip().lower()
+    if pose_mode not in ("standing", "sitting", "lying"):
+        pose_mode = "standing"
+    if seed is None:
+        seed = random.randint(0, 2**31 - 1)
+    try:
+        scale = max(0.25, min(1.0, float(scale)))
+    except (TypeError, ValueError):
+        scale = 1.0
+
+    run_id = uuid.uuid4().hex
+    run_dir = Path(runs_dir) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(filename).suffix or ".png"
+    image_path = run_dir / f"input{ext}"
+    image_path.write_bytes(image_bytes)
+
+    out_w, out_h = _output_size(image_path, scale=scale)
+    meta = {
+        "run_id": run_id,
+        "pose_mode": pose_mode,
+        "seed": seed,
+        "scale": scale,
+        "size": [out_w, out_h],
+        "image": image_path.name,
+        "step": "created",
+        "extracted": False,
+        "idle_done": False,      # idle skeleton motion ready
+        "action_done": False,    # action skeleton motion ready
+        "idle_scail_done": False,
+        "action_scail_done": False,
+        "scail_done": False,     # both SCAIL character videos ready
+    }
+    _save_meta(run_dir, meta)
+    return {
+        "run_id": run_id,
+        "pose_mode": pose_mode,
+        "seed": seed,
+        "scale": scale,
+        "size": [out_w, out_h],
+        "image": _rel_url(image_path),
+    }
+
+
+def stage_extract(run_id: str, *, runs_dir: Path = RUNS_DIR, n_frames: int = 90) -> dict:
+    """All pose modes: HMR → hips-only constraint → static skeleton preview."""
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+    image = _find_image(run_dir)
+    pose_mode = meta["pose_mode"]
+    out: dict = {"run_id": run_id, "pose_mode": pose_mode, "errors": {}}
+
+    constraint_path = run_dir / "constraint.json"
+    try:
+        _run_subprocess("phase1_extract", [
+            str(SEATED_HERE / "phase1_extract.py"),
+            str(image),
+            str(constraint_path),
+            str(n_frames),
+            pose_mode,  # standing|sitting|lying → hips-only pin
+        ])
+    except Exception as exc:
+        out["errors"]["extract"] = str(exc)
+        return out
+
+    # FK preview via comfy-scail env (has kimodo + torch)
+    try:
+        cons = json.loads(constraint_path.read_text(encoding="utf-8"))
+        c0 = cons[0]
+        # Still only (1 frame → png + short h264 for compatibility)
+        skel = run_dir / "extract_skel.mp4"
+        _run_subprocess("render_constraint_skel", [
+            str(SEATED_HERE / "render_constraint_skel.py"),
+            str(constraint_path),
+            str(skel),
+            "1",
+        ])
+        meta["extracted"] = True
+        meta["step"] = "extracted"
+        meta["constraint_joints"] = c0.get("joint_names")
+        _save_meta(run_dir, meta)
+        png = skel.with_suffix(".png")
+        out.update({
+            "skipped": False,
+            # UI uses PNG still for extract; mp4 kept for SCAIL tooling if needed
+            "skeleton": None,
+            "skeleton_png": _rel_url(png) if png.is_file() else _rel_url(skel),
+            "constraint_joints": c0.get("joint_names"),
+            "seed": meta["seed"],
+        })
+    except Exception as exc:
+        if constraint_path.is_file():
+            meta["extracted"] = True
+            meta["step"] = "extracted"
+            _save_meta(run_dir, meta)
+            out["constraint"] = _rel_url(constraint_path)
+            out["warning"] = f"preview render failed: {exc}"
+            # still allow proceeding to idle
+        else:
+            out["errors"]["extract_preview"] = str(exc)
+    return out
+
+
+def _parse_duration(value, default: float, lo: float = 1.0, hi: float = 5.0) -> float:
+    try:
+        d = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        d = float(default)
+    return max(lo, min(hi, d))
+
+
+def _kimodo_job(
+    run_dir: Path,
+    *,
+    seed: int,
+    name: str,
+    prompt: str,
+    pose_mode: str,
+    duration: float | None = None,
+) -> dict:
+    """Build a Kimodo job dict.
+
+    Standing: free text-to-motion (no pose pin).
+    Sitting/lying **idle**: hips-only pin (keeps seat/lie root while calm).
+    Sitting/lying **action**: free Kimodo (so limbs can swing large); post-process
+    re-sticks start pose + locks lower body. Pinning during action killed amplitude.
+    """
+    if duration is None:
+        duration = IDLE_DURATION_SEC if name == "idle" else ACTION_DURATION_SEC
+    duration = _parse_duration(duration, ACTION_DURATION_SEC if name == "action" else IDLE_DURATION_SEC)
+    job = {
+        "outdir": str(run_dir),
+        "seed": seed,
+        "duration": float(duration),
+        "steps": 100,
+        "jobs": [{"name": name, "prompt": prompt}],
+    }
+    pose_mode = (pose_mode or "standing").strip().lower()
+    use_pin = pose_mode in ("sitting", "lying") and name == "idle"
+    if use_pin:
+        constraint = run_dir / "constraint.json"
+        if not constraint.is_file():
+            raise FileNotFoundError("missing constraint.json — run extract first")
+        job["constraint_json"] = str(constraint)
+    else:
+        job["constraint_json"] = ""
+    return job
+
+
+def _parse_keep(value, default: float) -> float:
+    try:
+        k = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        k = float(default)
+    return max(0.0, min(1.0, k))
+
+
+def _parse_idle_motion_keep(value, default: float = IDLE_MOTION_KEEP) -> float:
+    return _parse_keep(value, default)
+
+
+def _parse_action_motion_keep(value, default: float = ACTION_MOTION_KEEP) -> float:
+    return _parse_keep(value, default)
+
+
+def _load_extract_pose_and_camera(run_dir: Path):
+    """Return (base_pose[J,3]|None, camera_dict|None) for session-consistent framing."""
+    extract_pose = run_dir / "extract_pose.npy"
+    if not extract_pose.is_file():
+        return None, None
+    base = np.load(extract_pose)
+    cam = skeleton_camera_from_joints(base)
+    return base, cam
+
+
+def _load_action_base_pose(run_dir: Path, seed: int):
+    """Base start pose for action: extract_pose first; idle frame-0 if present.
+
+    Action does not require idle. Prefer extract_pose.npy (from Extract).
+    If idle was already run, its frame-0 is also extract-anchored and may be used
+    as a fallback when extract_pose is missing.
+    """
+    base, cam = _load_extract_pose_and_camera(run_dir)
+    if base is not None:
+        return np.asarray(base, dtype=np.float64).copy(), cam, "extract_pose"
+    idle_npz = run_dir / f"idle_seed{seed}.npz"
+    if idle_npz.is_file():
+        try:
+            with np.load(idle_npz) as z:
+                Pi = z["posed_joints"]
+            if Pi.ndim == 3 and Pi.shape[0] >= 1:
+                base = np.asarray(Pi[0], dtype=np.float64).copy()
+                cam = skeleton_camera_from_joints(base)
+                return base, cam, "idle_frame0"
+        except Exception:
+            pass
+    return None, None, None
+
+
+def stage_idle(
+    run_id: str,
+    *,
+    idle_prompt: str | None = None,
+    idle_motion_keep: float | None = None,
+    runs_dir: Path = RUNS_DIR,
+    client: ComfyClient | None = None,
+) -> dict:
+    """Kimodo idle motion only → skeleton + SCAIL guide (no character video yet)."""
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+    if not meta.get("extracted"):
+        return {"run_id": run_id, "errors": {"idle": "run extract first"}}
+    image = _find_image(run_dir)
+    seed = meta["seed"]
+    scale = meta.get("scale", 1.0)
+    pose_mode = meta.get("pose_mode", "standing")
+    keep = _parse_idle_motion_keep(
+        idle_motion_keep if idle_motion_keep is not None else meta.get("idle_motion_keep"),
+        default=IDLE_MOTION_KEEP,
+    )
+    out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
+    idle_text = ensure_mouth_still((idle_prompt or "").strip() or DEFAULT_IDLE_PROMPT)
+    out: dict = {
+        "run_id": run_id,
+        "errors": {},
+        "seed": seed,
+        "pose_mode": pose_mode,
+        "idle_motion_keep": keep,
+    }
+
+    try:
+        job = _kimodo_job(
+            run_dir,
+            seed=seed,
+            name="idle",
+            prompt=idle_text,
+            pose_mode=pose_mode,
+            duration=IDLE_DURATION_SEC,
+        )
+        job_path = run_dir / "kimodo_job_idle.json"
+        job_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+        _run_subprocess("gen_kimodo_idle", [
+            str(SEATED_HERE / "gen_kimodo_standalone.py"),
+            str(job_path),
+        ])
+        npz = run_dir / f"idle_seed{seed}.npz"
+        if not npz.is_file():
+            out["errors"]["idle"] = "idle npz missing"
+            return out
+        # Close NpzFile before overwrite (Windows locks open mmap files).
+        with np.load(npz) as raw:
+            save_kw = {k: raw[k].copy() for k in raw.files}
+        P_raw = save_kw["posed_joints"]
+        std_raw = float(np.asarray(P_raw).std(axis=0).mean())
+        # Boost near-static Kimodo clips so the keep slider has headroom (100% works).
+        P_src = prepare_idle_source_motion(P_raw)
+        std_source = float(np.asarray(P_src).std(axis=0).mean())
+        # Extract pose strength = 100%: fully stuck base; keep only scales deltas.
+        base, cam = _load_extract_pose_and_camera(run_dir)
+        P = dampen_idle_joints(P_src, keep=keep, base_pose=base)
+        save_kw["posed_joints"] = P
+        np.savez(npz, **save_kw)
+        skel = run_dir / "idle_skel.mp4"
+        guide = run_dir / "idle_guide.mp4"
+        # Same camera as extract so idle frame-0 matches extract still.
+        render_smplx_guide(P, skel, camera=cam)
+        _pad_to_aspect(skel, guide, out_w, out_h)
+        out["skeleton"] = _rel_url(skel)
+        png = skel.with_suffix(".png")
+        out["skeleton_png"] = _rel_url(png) if png.is_file() else None
+        out["n_frames"] = int(P.shape[0])
+        out["motion_std_before"] = std_raw
+        out["motion_std_source"] = std_source
+        out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+        out["idle_motion_keep"] = keep
+        out["idle_anchored_to_extract"] = base is not None
+        out["extract_pose_strength"] = 1.0  # always fully stuck
+        out["kimodo_constraint"] = bool(job.get("constraint_json"))
+    except Exception as exc:
+        out["errors"]["idle"] = str(exc)
+        return out
+
+    meta["idle_done"] = True
+    meta["step"] = "idle_skel"
+    meta["idle_prompt"] = idle_text
+    meta["idle_motion_keep"] = keep
+    meta["idle_scail_done"] = False
+    meta["scail_done"] = False  # invalidate final videos if re-run
+    _save_meta(run_dir, meta)
+    out["size"] = [out_w, out_h]
+    return out
+
+
+def stage_action(
+    run_id: str,
+    *,
+    action_prompt: str,
+    action_motion_keep: float | None = None,
+    action_duration: float | None = None,
+    runs_dir: Path = RUNS_DIR,
+    client: ComfyClient | None = None,
+) -> dict:
+    """Kimodo action motion only → skeleton + guide (no SCAIL, no overshoot)."""
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+    if not meta.get("extracted"):
+        return {"run_id": run_id, "errors": {"action": "run extract first"}}
+    if not (action_prompt or "").strip():
+        return {"run_id": run_id, "errors": {"action": "action_prompt is required"}}
+    action_text = sanitize_action(action_prompt)
+    keep = _parse_action_motion_keep(
+        action_motion_keep if action_motion_keep is not None else meta.get("action_motion_keep"),
+        default=ACTION_MOTION_KEEP,
+    )
+    duration = _parse_duration(
+        action_duration if action_duration is not None else meta.get("action_duration"),
+        ACTION_DURATION_SEC,
+        lo=1.0,
+        hi=5.0,
+    )
+
+    image = _find_image(run_dir)
+    seed = meta["seed"]
+    scale = meta.get("scale", 1.0)
+    pose_mode = meta.get("pose_mode", "standing")
+    out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
+    out: dict = {
+        "run_id": run_id,
+        "errors": {},
+        "seed": seed,
+        "pose_mode": pose_mode,
+        "action_motion_keep": keep,
+        "action_duration": duration,
+        "extract_pose_strength": 1.0,
+    }
+
+    try:
+        job = _kimodo_job(
+            run_dir,
+            seed=seed,
+            name="action",
+            prompt=action_text,
+            pose_mode=pose_mode,
+            duration=duration,
+        )
+        job_path = run_dir / "kimodo_job_action.json"
+        job_path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+        _run_subprocess("gen_kimodo_action", [
+            str(SEATED_HERE / "gen_kimodo_standalone.py"),
+            str(job_path),
+        ])
+        npz = run_dir / f"action_seed{seed}.npz"
+        if not npz.is_file():
+            out["errors"]["action"] = "action npz missing"
+            return out
+        with np.load(npz) as raw:
+            save_kw = {k: raw[k].copy() for k in raw.files}
+        P_raw = np.asarray(save_kw["posed_joints"], dtype=np.float64)
+        base, cam, base_src = _load_action_base_pose(run_dir, seed)
+        if base is None:
+            out["errors"]["action"] = (
+                "missing extract_pose.npy — re-run Extract before Action"
+            )
+            return out
+        # Sitting/lying: free Kimodo then lock lower body; boost weak upper motion
+        # so keep=100% is clearly different from idle micro-motion.
+        lock_lower = pose_mode in ("sitting", "lying")
+        f0_err_before = float(np.linalg.norm(P_raw[0] - base, axis=-1).mean())
+        P = align_motion_to_base_pose(
+            P_raw,
+            base,
+            keep=keep,
+            lock_lower_body=lock_lower,
+            boost_upper=True,
+        )
+        f0_err = float(np.linalg.norm(P[0] - base, axis=-1).mean())
+        if f0_err > 1e-4:
+            # Hard fail rather than silently shipping standing default start.
+            out["errors"]["action"] = (
+                f"start-pose align failed (f0_err={f0_err:.5f}, before={f0_err_before:.5f})"
+            )
+            return out
+        save_kw["posed_joints"] = P.astype(np.float64)
+        # Rewrite aligned joints. np.savez appends ".npz" if missing — use a real .npz name.
+        # On Windows, Path.replace can fail if target is open; write then replace.
+        tmp_npz = run_dir / f"action_seed{seed}_aligned.npz"
+        np.savez(tmp_npz, **save_kw)
+        try:
+            tmp_npz.replace(npz)
+        except OSError:
+            # Fallback: overwrite in place if replace fails (file lock).
+            np.savez(npz, **save_kw)
+            try:
+                tmp_npz.unlink(missing_ok=True)
+            except OSError:
+                pass
+        # Verify what is on disk
+        with np.load(npz) as chk:
+            f0_disk = float(np.linalg.norm(chk["posed_joints"][0] - base, axis=-1).mean())
+        if f0_disk > 1e-4:
+            out["errors"]["action"] = f"npz rewrite verify failed (f0_disk={f0_disk:.5f})"
+            return out
+        skel = run_dir / "action_skel.mp4"
+        guide = run_dir / "action_guide.mp4"
+        # Same camera as extract/idle so frame0 matches the still the user approved.
+        render_smplx_guide(P, skel, camera=cam)
+        _pad_to_aspect(skel, guide, out_w, out_h)
+        out["skeleton"] = _rel_url(skel)
+        png = skel.with_suffix(".png")
+        out["skeleton_png"] = _rel_url(png) if png.is_file() else None
+        out["n_frames"] = int(P.shape[0])
+        out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+        out["motion_std_raw"] = float(np.asarray(P_raw).std(axis=0).mean())
+        # Upper-body (arms/spine) residual magnitude — should be >> idle when keep=1
+        upper_idx = [j for j in range(12, min(22, P.shape[1]))]
+        if upper_idx:
+            up = P[:, upper_idx, :] - P[0:1, upper_idx, :]
+            out["upper_motion_std"] = float(np.sqrt(np.mean(up * up)))
+        out["action_anchored_to_extract"] = True
+        out["action_base_source"] = base_src
+        out["action_f0_err"] = f0_err
+        out["action_f0_err_before"] = f0_err_before
+        out["action_f0_err_disk"] = f0_disk
+        out["action_lock_lower"] = lock_lower
+        out["action_motion_keep"] = keep
+        out["kimodo_constraint"] = bool(job.get("constraint_json"))
+    except Exception as exc:
+        out["errors"]["action"] = str(exc)
+        return out
+
+    meta["action_done"] = True
+    meta["step"] = "action_skel"
+    meta["action_prompt"] = action_text
+    meta["action_motion_keep"] = keep
+    meta["action_duration"] = duration
+    meta["action_anchored_to_extract"] = True
+    meta["joint_overshoot"] = False
+    meta["action_scail_done"] = False
+    meta["scail_done"] = False
+    meta["time_overshoot"] = False
+    # Drop previous joint npz so SCAIL won't use a stale springed motion.
+    joint_npz = run_dir / f"action_joint_seed{seed}.npz"
+    if joint_npz.is_file():
+        try:
+            joint_npz.unlink()
+        except OSError:
+            pass
+    _save_meta(run_dir, meta)
+    out["size"] = [out_w, out_h]
+    return out
+
+
+def stage_scail(
+    run_id: str,
+    *,
+    which: str = "both",
+    runs_dir: Path = RUNS_DIR,
+    client: ComfyClient | None = None,
+) -> dict:
+    """SCAIL2: drive character image with skeleton guide(s).
+
+    which:
+      - \"idle\"   — only idle.mp4 (needs idle skeleton motion done)
+      - \"action\" — only action.mp4 (needs action skeleton motion done)
+      - \"both\"   — idle then action (legacy / Run all)
+    """
+    which = (which or "both").strip().lower()
+    if which not in ("idle", "action", "both"):
+        return {"run_id": run_id, "errors": {"scail": "which must be idle|action|both"}}
+
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+
+    labels: list[tuple[str, str]] = []
+    if which in ("idle", "both"):
+        if not meta.get("idle_done"):
+            return {
+                "run_id": run_id,
+                "errors": {"idle": "run idle skeleton motion first"},
+            }
+        labels.append(("idle", SCAIL_IDLE_POSITIVE))
+    if which in ("action", "both"):
+        if not meta.get("action_done"):
+            return {
+                "run_id": run_id,
+                "errors": {"action": "run action skeleton motion first"},
+            }
+        labels.append(("action", SCAIL_ACTION_POSITIVE))
+
+    image = _find_image(run_dir)
+    seed = meta["seed"]
+    scale = meta.get("scale", 1.0)
+    out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
+    pose_mode = meta["pose_mode"]
+    out: dict = {
+        "run_id": run_id,
+        "errors": {},
+        "seed": seed,
+        "size": [out_w, out_h],
+        "which": which,
+    }
+
+    if client is None:
+        client = ComfyClient()
+
+    fre0 = client.free_vram(interrupt=False, clear_queue=True, wait_s=40, min_free_gb=8.0)
+    out["comfy_free_start"] = fre0
+    print(f"[stage_scail] which={which} free_vram start: {fre0}", flush=True)
+
+    for label, positive in labels:
+        guide = run_dir / f"{label}_guide.mp4"
+        skel = run_dir / f"{label}_skel.mp4"
+        if not guide.is_file():
+            if not skel.is_file():
+                out["errors"][label] = f"missing {label}_skel / guide — re-run {label} motion"
+                continue
+            try:
+                _pad_to_aspect(skel, guide, out_w, out_h)
+            except Exception as exc:
+                out["errors"][label] = f"guide pad failed: {exc}"
+                continue
+        npz = run_dir / f"{label}_seed{seed}.npz"
+        if label == "action":
+            joint_npz = run_dir / f"action_joint_seed{seed}.npz"
+            if joint_npz.is_file() and meta.get("joint_overshoot"):
+                npz = joint_npz
+        n_frames = int(np.load(npz)["posed_joints"].shape[0]) if npz.is_file() else 89
+        try:
+            out_mp4 = drive_character(
+                client, guide, image, run_dir / f"{label}.mp4",
+                length=align_4k1(n_frames), width=out_w, height=out_h,
+                prefix=f"mp_{pose_mode}_{label}", seed=seed,
+                positive=positive,
+            )
+            out[label] = _rel_url(out_mp4)
+            meta[f"{label}_scail_done"] = True
+        except Exception as exc:
+            out["errors"][label] = str(exc)
+            client.free_vram(interrupt=True, clear_queue=True, wait_s=30, min_free_gb=6.0)
+
+    fre1 = client.free_vram(interrupt=False, clear_queue=False, wait_s=30, min_free_gb=8.0)
+    out["comfy_free_end"] = fre1
+    print(f"[stage_scail] free_vram end: {fre1}", flush=True)
+
+    # Include already-done sibling URLs so UI can refresh player
+    for label in ("idle", "action"):
+        if out.get(label):
+            continue
+        p = run_dir / f"{label}.mp4"
+        if p.is_file():
+            out[label] = _rel_url(p)
+
+    idle_ok = bool(meta.get("idle_scail_done") or (run_dir / "idle.mp4").is_file())
+    action_ok = bool(meta.get("action_scail_done") or (run_dir / "action.mp4").is_file())
+    # Refresh flags from disk if meta lagging
+    if (run_dir / "idle.mp4").is_file():
+        meta["idle_scail_done"] = True
+        idle_ok = True
+    if (run_dir / "action.mp4").is_file():
+        meta["action_scail_done"] = True
+        action_ok = True
+
+    out["idle_scail_done"] = idle_ok
+    out["action_scail_done"] = action_ok
+    if idle_ok and action_ok:
+        meta["scail_done"] = True
+        meta["step"] = "scail"
+    elif out.get("idle") and not out.get("errors", {}).get("idle"):
+        meta["step"] = "scail_idle"
+    elif out.get("action") and not out.get("errors", {}).get("action"):
+        meta["step"] = "scail_action"
+    _save_meta(run_dir, meta)
+    return out
+
+
+def stage_joint_overshoot(
+    run_id: str,
+    *,
+    runs_dir: Path = RUNS_DIR,
+) -> dict:
+    """Joint-space spring on action skeleton only (no SCAIL, no video remap).
+
+    Springs from raw Kimodo ``action_seed*.npz``, rewrites ``action_skel`` /
+    ``action_guide`` so the next SCAIL step uses the overshot motion.
+    """
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+    if not meta.get("action_done"):
+        return {"run_id": run_id, "errors": {"joint": "run action skeleton first"}}
+
+    seed = meta["seed"]
+    scale = meta.get("scale", 1.0)
+    image = _find_image(run_dir)
+    out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
+    out: dict = {"run_id": run_id, "errors": {}, "seed": seed, "size": [out_w, out_h]}
+
+    try:
+        raw = run_dir / f"action_seed{seed}.npz"
+        if not raw.is_file():
+            out["errors"]["joint"] = "missing action_seed npz — re-run action motion"
+            return out
+        P = np.asarray(np.load(raw)["posed_joints"], dtype=np.float64)
+        P = spring_follow(
+            P, FPS,
+            omega=JOINT_SPRING["omega"],
+            zeta=JOINT_SPRING["zeta"],
+            soft_scale=JOINT_SPRING["soft"],
+        )
+        # Re-stick start pose after spring (idle frame0 / extract).
+        pose_mode = meta.get("pose_mode", "standing")
+        base, cam, _src = _load_action_base_pose(run_dir, seed)
+        if base is not None:
+            P = align_motion_to_base_pose(
+                P, base, keep=1.0,
+                lock_lower_body=pose_mode in ("sitting", "lying"),
+            )
+        np.savez(run_dir / f"action_joint_seed{seed}.npz", posed_joints=P)
+        skel = run_dir / "action_skel.mp4"
+        guide = run_dir / "action_guide.mp4"
+        render_smplx_guide(P, skel, camera=cam)
+        _pad_to_aspect(skel, guide, out_w, out_h)
+        out["skeleton"] = _rel_url(skel)
+        png = skel.with_suffix(".png")
+        out["skeleton_png"] = _rel_url(png) if png.is_file() else None
+        out["n_frames"] = int(P.shape[0])
+        out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+    except Exception as exc:
+        out["errors"]["joint"] = str(exc)
+        return out
+
+    meta["joint_overshoot"] = True
+    meta["action_scail_done"] = False
+    meta["scail_done"] = False  # guides changed — need SCAIL again
+    meta["step"] = "action_joint"
+    _save_meta(run_dir, meta)
+    return out
+
+
+def stage_time_overshoot(
+    run_id: str,
+    *,
+    runs_dir: Path = RUNS_DIR,
+) -> dict:
+    """Time-space spring remap on final action character video only.
+
+    Requires SCAIL ``action.mp4``. Idle is unchanged. No Comfy / no joint edit.
+    """
+    run_dir = Path(runs_dir) / run_id
+    meta = _load_meta(run_dir)
+    src = run_dir / "action.mp4"
+    if not meta.get("scail_done") and not src.is_file():
+        return {"run_id": run_id, "errors": {"time": "run SCAIL2 first (need action video)"}}
+    if not src.is_file():
+        return {"run_id": run_id, "errors": {"time": "missing action.mp4"}}
+
+    out: dict = {"run_id": run_id, "errors": {}, "seed": meta.get("seed")}
+    try:
+        timed = run_dir / "action_timed.mp4"
+        time_remap_file(src, timed, **TIME_SPRING)
+        # Keep a browser-primary path too: some players cache action.mp4 by URL stem.
+        # Replace action.mp4 with timed H.264 so /runs/.../action.mp4 is always playable.
+        raw_backup = run_dir / "action_scail.mp4"
+        if not raw_backup.is_file() and src.is_file():
+            try:
+                import shutil
+                shutil.copy2(src, raw_backup)
+            except OSError:
+                pass
+        try:
+            import shutil
+            shutil.copy2(timed, src)
+        except OSError:
+            pass
+        # Prefer action.mp4 URL (cache-bust on client); also return timed.
+        out["action"] = _rel_url(src) or _rel_url(timed)
+        out["action_timed"] = _rel_url(timed)
+    except Exception as exc:
+        out["errors"]["time"] = str(exc)
+        return out
+
+    meta["time_overshoot"] = True
+    meta["step"] = "time_overshoot"
+    _save_meta(run_dir, meta)
+    idle_p = run_dir / "idle.mp4"
+    if idle_p.is_file():
+        out["idle"] = _rel_url(idle_p)
+    return out
+
+
+def _bgremove_one(
+    run_dir: Path,
+    src: Path,
+    label: str,
+    *,
+    model: str,
+) -> dict:
+    """Run worker on one video; return dict of URL fields / error."""
+    import shutil
+
+    from pipeline.bgremove import run_bgremove
+
+    piece: dict = {}
+    if not src.is_file():
+        piece["error"] = f"missing {src.name}"
+        return piece
+    work = run_dir / f"_bgremove_{label}"
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        result = run_bgremove(src, work, model=model, formats="webm", fp16=True)
+        preview = result.get("preview")
+        if preview and Path(preview).is_file():
+            dest_prev = run_dir / f"{label}_nobg.mp4"
+            shutil.copy2(preview, dest_prev)
+            piece["nobg"] = _rel_url(dest_prev)
+        for p in result.get("outputs") or []:
+            p = Path(p)
+            if p.suffix.lower() == ".webm" and p.is_file():
+                dest_w = run_dir / f"{label}_nobg.webm"
+                shutil.copy2(p, dest_w)
+                piece["nobg_webm"] = _rel_url(dest_w)
+        if not piece.get("nobg") and not piece.get("nobg_webm"):
+            piece["error"] = "worker produced no output files"
+    except Exception as exc:
+        piece["error"] = str(exc)
+    return piece
+
+
+def stage_bgremove(
+    run_id: str | None = None,
+    *,
+    which: str = "both",
+    model: str = "RVM MobileNetV3",
+    upload_bytes: bytes | None = None,
+    upload_filename: str = "upload.mp4",
+    runs_dir: Path = RUNS_DIR,
+) -> dict:
+    """Video background removal via videoBGremoval worker.
+
+    No hard pipeline prerequisites:
+      - which idle|action|both: process session SCAIL mp4s if present
+      - which upload (or upload_bytes set): process an uploaded video only
+    Creates a fresh run_id when none is provided (standalone upload mode).
+    """
+    from pipeline.bgremove import BG_MODELS
+
+    which = (which or "both").strip().lower()
+    if which not in ("idle", "action", "both", "upload"):
+        return {"run_id": run_id, "errors": {"bgremove": "which must be idle|action|both|upload"}}
+    if model not in BG_MODELS:
+        model = BG_MODELS[0]
+
+    runs_dir = Path(runs_dir)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Standalone upload without session → new run folder
+    if not run_id or not (runs_dir / run_id).is_dir():
+        if upload_bytes is None and which == "upload":
+            return {"errors": {"bgremove": "upload a video or create a session first"}}
+        if upload_bytes is not None or which == "upload":
+            run_id = uuid.uuid4().hex
+            run_dir = runs_dir / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            meta = {
+                "run_id": run_id,
+                "pose_mode": "standing",
+                "seed": 0,
+                "step": "bgremove_only",
+                "standalone_bgremove": True,
+            }
+            _save_meta(run_dir, meta)
+        else:
+            return {"errors": {"bgremove": "invalid run_id — create session or upload a video"}}
+    else:
+        run_dir = runs_dir / run_id
+        try:
+            meta = _load_meta(run_dir)
+        except FileNotFoundError:
+            meta = {"run_id": run_id}
+
+    out: dict = {
+        "run_id": run_id,
+        "errors": {},
+        "which": which,
+        "model": model,
+    }
+
+    # Free Comfy VRAM before matting (best-effort; may be offline).
+    try:
+        fre = ComfyClient().free_vram(
+            interrupt=False, clear_queue=False, wait_s=15, min_free_gb=4.0
+        )
+        out["comfy_free"] = fre
+    except Exception as exc:
+        out["comfy_free"] = {"error": str(exc)}
+
+    jobs: list[tuple[str, Path]] = []  # (label, src)
+
+    # Optional arbitrary video (no pipeline prerequisites).
+    if upload_bytes is not None:
+        ext = Path(upload_filename or "upload.mp4").suffix or ".mp4"
+        if ext.lower() not in (".mp4", ".webm", ".mov", ".avi", ".mkv"):
+            ext = ".mp4"
+        up_path = run_dir / f"upload{ext}"
+        up_path.write_bytes(upload_bytes)
+        out["upload"] = _rel_url(up_path)
+        jobs.append(("upload", up_path))
+
+    # Optional session SCAIL outputs (skip quietly if missing).
+    if which in ("idle", "both") and (run_dir / "idle.mp4").is_file():
+        jobs.append(("idle", run_dir / "idle.mp4"))
+    if which in ("action", "both") and (run_dir / "action.mp4").is_file():
+        jobs.append(("action", run_dir / "action.mp4"))
+
+    # which=upload with only file already handled; which=both with no files + no upload:
+    if not jobs:
+        out["errors"]["bgremove"] = (
+            "nothing to process — choose a video file, or generate idle/action.mp4 in this session"
+        )
+        return out
+
+    for label, src in jobs:
+        piece = _bgremove_one(run_dir, src, label, model=model)
+        if piece.get("error"):
+            out["errors"][label] = piece["error"]
+            continue
+        if piece.get("nobg"):
+            out[f"{label}_nobg"] = piece["nobg"]
+        if piece.get("nobg_webm"):
+            out[f"{label}_nobg_webm"] = piece["nobg_webm"]
+        meta[f"{label}_bgremove_done"] = True
+
+    has_out = any(
+        out.get(k)
+        for k in (
+            "idle_nobg",
+            "action_nobg",
+            "upload_nobg",
+            "idle_nobg_webm",
+            "action_nobg_webm",
+            "upload_nobg_webm",
+        )
+    )
+    if has_out:
+        meta["bgremove_done"] = True
+        meta["bgremove_model"] = model
+        meta["step"] = "bgremove"
+        _save_meta(run_dir, meta)
+
+    # Player convenience
+    if out.get("idle_nobg"):
+        out["idle"] = out["idle_nobg"]
+    elif (run_dir / "idle.mp4").is_file():
+        out["idle"] = _rel_url(run_dir / "idle.mp4")
+    if out.get("action_nobg"):
+        out["action"] = out["action_nobg"]
+    elif out.get("upload_nobg"):
+        out["action"] = out["upload_nobg"]
+    elif (run_dir / "action.mp4").is_file():
+        out["action"] = _rel_url(run_dir / "action.mp4")
+
+    # Drop soft "missing" errors when we still produced something from other sources
+    if has_out:
+        for k in list(out["errors"].keys()):
+            if "no " in str(out["errors"][k]) and "mp4" in str(out["errors"][k]):
+                # keep only real process errors
+                if "optional" in str(out["errors"][k]):
+                    del out["errors"][k]
+
+    return out
+
+
+def stage_overshoot(
+    run_id: str,
+    *,
+    overshoot: set,
+    runs_dir: Path = RUNS_DIR,
+    client: ComfyClient | None = None,
+) -> dict:
+    """Legacy dispatcher: joint → skeleton spring; time → final video remap.
+
+    Prefer ``stage_joint_overshoot`` / ``stage_time_overshoot`` from the UI.
+    ``client`` is unused (joint no longer re-SCAILs).
+    """
+    del client  # joint no longer needs Comfy
+    plan = plan_steps(overshoot or set())
+    out: dict = {"run_id": run_id, "errors": {}}
+    if not plan["joint"] and not plan["time"]:
+        out["errors"]["overshoot"] = "select joint and/or time overshoot"
+        return out
+    if plan["joint"]:
+        j = stage_joint_overshoot(run_id, runs_dir=runs_dir)
+        out.update({k: v for k, v in j.items() if k != "errors"})
+        if j.get("errors"):
+            out.setdefault("errors", {}).update(j["errors"])
+    if plan["time"]:
+        t = stage_time_overshoot(run_id, runs_dir=runs_dir)
+        out.update({k: v for k, v in t.items() if k != "errors"})
+        if t.get("errors"):
+            out.setdefault("errors", {}).update(t["errors"])
+    return out

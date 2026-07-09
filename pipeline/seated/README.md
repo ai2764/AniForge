@@ -11,14 +11,14 @@ smplx22 skeleton guide → scail2 → animated portrait.
 
 | Mode | Constraint |
 |------|------------|
-| sitting | end-effector pin `Hips` + `LeftFoot` + `RightFoot` (upper body free) |
-| lying | **fullbody** joint lock all frames (skeleton locked to extract) |
+| standing | extract still from image; Kimodo idle/action is **free** (no pin) so text prompts produce distinct motion |
+| sitting / lying | end-effector pin **`Hips` only** (limbs free). Pinning feet/hands or fullbody froze action amplitude. |
 
 ## Files
 - `phase1_extract.py <image> <out_constraint.json> [T]` — HMR2 (4D-Humans) on the image →
   SMPL `body_pose` → smplx22 axis-angle → **ground** (feet at Y=0, pelvis at seat height) →
-  writes an **all-frames** `end-effector` constraint pinning `["Hips","LeftFoot","RightFoot"]`
-  (pelvis pos+rot + both ankle/foot positions). Legs/upper body stay free.
+  writes an **all-frames** `end-effector` constraint pinning `["Hips"]`
+  (pelvis pos+rot only). Arms and legs stay free for large action motion.
 - `gen_kimodo_standalone.py <constraint.json> <idle_prefix> <action_prefix>` — loads
   `Kimodo-SMPLX-RP-v1` once, generates an idle + an action motion under the constraint,
   saves NPZs to the ComfyUI output dir. Pose-agnostic prompts (constraint owns the pose).

@@ -7,14 +7,15 @@
   :root { color-scheme: light dark; }
   body {
     font-family: system-ui, sans-serif;
-    max-width: 640px;
+    max-width: 720px;
     margin: 2rem auto;
     padding: 0 1rem;
   }
   h1 { font-size: 1.4rem; }
-  form { display: flex; flex-direction: column; gap: 0.75rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+  form, .section { display: flex; flex-direction: column; gap: 0.75rem; }
   label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
-  input[type="text"] {
+  input[type="text"], input[type="number"] {
     width: 100%;
     box-sizing: border-box;
     padding: 0.4rem;
@@ -54,12 +55,142 @@
     color: #fff;
   }
   .pose-hint { font-size: 0.85rem; opacity: 0.75; margin: 0.25rem 0 0; }
+  .size-readout {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0.4rem 0 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .label-with-info {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+  .label-with-info > span:first-child { font-weight: 600; }
+  .info-tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.05rem;
+    height: 1.05rem;
+    border-radius: 50%;
+    border: 1px solid #888;
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    color: #666;
+    cursor: help;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .info-tip:hover, .info-tip:focus {
+    background: #2a7de1;
+    border-color: #2a7de1;
+    color: #fff;
+    outline: none;
+  }
+  .info-tip .info-bubble {
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    width: min(280px, 70vw);
+    padding: 0.55rem 0.65rem;
+    border-radius: 6px;
+    background: #1a1a1a;
+    color: #f2f2f2;
+    font-size: 0.78rem;
+    font-weight: 400;
+    font-style: normal;
+    font-family: system-ui, sans-serif;
+    line-height: 1.35;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    z-index: 20;
+    pointer-events: none;
+    text-align: left;
+  }
+  .info-tip .info-bubble::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -6px;
+    border: 6px solid transparent;
+    border-top-color: #1a1a1a;
+  }
+  .info-tip:hover .info-bubble,
+  .info-tip:focus .info-bubble {
+    display: block;
+  }
+  input[type="range"] { width: 100%; }
   button {
     padding: 0.6rem;
     font-size: 1rem;
     cursor: pointer;
   }
-  #status { min-height: 1.2em; }
+  button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-run-all {
+    background: #2a7de1;
+    color: #fff;
+    border: 1px solid #2a7de1;
+  }
+  .btn-run-all:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .section {
+    border: 1px solid #8884;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+  .section.locked { opacity: 0.55; }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .section-head h2 { margin: 0; }
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: #8883;
+  }
+  .badge.done { background: #2a7de133; color: #2a7de1; }
+  .badge.running { background: #e67e2233; color: #e67e22; }
+  .preview-box {
+    display: none;
+    margin-top: 0.75rem;
+    background: #000;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .preview-box.show { display: block; }
+  .preview-box video {
+    width: 100%;
+    display: block;
+    max-height: 420px;
+    background: #000;
+  }
+  .preview-label {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    padding: 0.35rem 0.5rem;
+    background: #111;
+    color: #ddd;
+  }
+  #status { min-height: 1.2em; margin-top: 0.5rem; }
   #errors { color: #c0392b; white-space: pre-wrap; }
   #preview {
     position: relative;
@@ -81,7 +212,7 @@
 <body>
   <h1>Motion Portrait</h1>
 
-  <form id="generate-form">
+  <form id="setup-form">
     <div>
       <label for="image-input">Character image</label>
       <div id="drop-zone">
@@ -98,36 +229,241 @@
         <label><input type="radio" name="pose_mode" value="sitting"> Sitting</label>
         <label><input type="radio" name="pose_mode" value="lying"> Lying</label>
       </div>
-      <p class="pose-hint" id="pose-hint">Standing: free motion from prompts (no pose pin).</p>
+      <p class="pose-hint" id="pose-hint">Standing: extract still from image; Kimodo idle/action free (no pin) so prompts differ.</p>
     </div>
 
     <div>
-      <label for="action_prompt">Action prompt</label>
-      <input type="text" id="action_prompt" name="action_prompt" required>
-    </div>
-
-    <div>
-      <label for="idle_prompt">Idle prompt (optional)</label>
-      <input type="text" id="idle_prompt" name="idle_prompt">
-    </div>
-
-    <div class="checkboxes" id="overshoot-row">
-      <label><input type="checkbox" name="overshoot" value="joint" id="overshoot-joint"> Joint overshoot</label>
-      <label><input type="checkbox" name="overshoot" value="time"> Time overshoot</label>
+      <label for="output_scale">Output scale <span id="output_scale_label">100%</span></label>
+      <input type="range" id="output_scale" name="scale" min="0.25" max="1" step="0.05" value="1">
+      <p class="pose-hint">Same aspect ratio as the image. 100% = max (~720p-class long side).</p>
+      <p class="size-readout" id="size-readout">Image: — &nbsp;→&nbsp; Video: —</p>
     </div>
 
     <label for="seed">Seed (optional, blank = random)</label>
     <input type="number" id="seed" name="seed" min="0" placeholder="random">
 
-    <button type="submit">Generate</button>
-    <div id="status"></div>
-    <div id="errors"></div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+      <button type="button" id="btn-create-session">1. Create session</button>
+      <button type="button" id="btn-run-all" class="btn-run-all">Run all steps</button>
+    </div>
+    <p class="pose-hint">Run all: session → extract → idle/action skel (independent) → SCAIL idle + SCAIL action → optional time. Needs image + action prompt.</p>
   </form>
 
-  <div id="preview">
-    <video id="idleVideo" loop muted playsinline autoplay></video>
-    <video id="actionVideo" muted playsinline></video>
-  </div>
+  <!-- Step: extract skeleton -->
+  <section class="section locked" id="sec-extract" data-step="extract">
+    <div class="section-head">
+      <h2>2. Extract pose</h2>
+      <span class="badge" id="badge-extract">locked</span>
+    </div>
+    <p class="pose-hint" id="extract-hint">
+      HMR pose from the image, pin pelvis (limbs free). Review skeleton before Idle.
+    </p>
+    <button type="button" id="btn-extract" disabled>Start extract</button>
+    <div class="preview-box" id="box-extract">
+      <div class="preview-label">Extracted pose (still)</div>
+      <img id="img-extract" alt="extracted skeleton" style="display:none;width:100%;max-height:480px;object-fit:contain;background:#f0f0f0">
+    </div>
+  </section>
+
+  <!-- Step: idle skeleton motion -->
+  <section class="section locked" id="sec-idle" data-step="idle">
+    <div class="section-head">
+      <h2>3. Idle skeleton motion</h2>
+      <span class="badge" id="badge-idle">locked</span>
+    </div>
+    <div>
+      <label for="idle_prompt">Idle prompt</label>
+      <input type="text" id="idle_prompt" name="idle_prompt"
+        value="A person holds their current pose in a relaxed idle with natural gentle motion: soft continuous breathing, a slight weight shift, and subtle sway of the torso, head, and arms. Keep the same overall posture; do not stand up or sit down; no walking, no waving, no dancing, no large gestures. Mouth closed and still the entire time, lips sealed, silent, no talking, no speaking, no lip movement, no chewing.">
+      <p class="pose-hint">Extract pose strength is always 100% (fully stuck). Amount only scales motion on top.</p>
+    </div>
+    <div>
+      <div class="label-with-info">
+        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">6%</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About idle motion amount">
+          i
+          <span class="info-bubble">
+            How much idle motion to keep after locking fully to the extract pose.
+            Formula: extract_pose + amount × (Kimodo frame deltas).
+            0% = frozen on extract; 6% = subtle (default); 30–60% = clearer sway;
+            100% = full source idle deltas on extract (visible motion).
+            Extract pose is always fully stuck — this slider does not loosen the pose.
+          </span>
+        </span>
+      </div>
+      <input type="range" id="idle_motion_keep" name="idle_motion_keep"
+        min="0" max="1" step="0.01" value="0.06">
+      <p class="pose-hint">Higher = more sway. Re-run Idle after changing (not live).</p>
+    </div>
+    <button type="button" id="btn-idle" disabled>Start idle motion</button>
+    <div class="preview-box" id="box-idle-skel">
+      <div class="preview-label">Idle skeleton video</div>
+      <img id="img-idle-skel" alt="idle skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
+      <video id="vid-idle-skel" muted loop playsinline controls autoplay></video>
+    </div>
+  </section>
+
+  <!-- Step: action skeleton motion (looping video, same as idle) -->
+  <section class="section locked" id="sec-action" data-step="action">
+    <div class="section-head">
+      <h2>4. Action skeleton motion</h2>
+      <span class="badge" id="badge-action">locked</span>
+    </div>
+    <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size.</p>
+    <div>
+      <label for="action_prompt">Action prompt</label>
+      <input type="text" id="action_prompt" name="action_prompt" placeholder="e.g. wave hello with one hand" required>
+    </div>
+    <div>
+      <div class="label-with-info">
+        <label for="action_duration">Action duration <span id="action_duration_label">2.0s</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About action duration">
+          i
+          <span class="info-bubble">
+            Length of the action clip in seconds (Kimodo @ 30fps, then SCAIL).
+            Default 2.0s — good for raise-hand / short gestures.
+            1.0–1.5s = snappy; 2.5–3s = longer phrases. Re-run Action + SCAIL action after change.
+          </span>
+        </span>
+      </div>
+      <input type="range" id="action_duration" name="action_duration"
+        min="1" max="3" step="0.1" value="2">
+    </div>
+    <div>
+      <div class="label-with-info">
+        <label for="action_motion_keep">Action motion amount <span id="action_motion_keep_label">100%</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About action motion amount">
+          i
+          <span class="info-bubble">
+            Scales how big the action swing is (not start-pose stick).
+            Start pose always fully matches extract; sitting/lying legs stay locked.
+            100% = full (boosted) action; 50% = half; 0% = frozen extract.
+            If 100% still looks like idle, re-run Action after server restart —
+            action is generated free then retargeted so arms can move large.
+          </span>
+        </span>
+      </div>
+      <input type="range" id="action_motion_keep" name="action_motion_keep"
+        min="0" max="1" step="0.01" value="1">
+      <p class="pose-hint">Re-run Action (+ SCAIL action) after changing duration/amount.</p>
+    </div>
+    <div class="checkboxes">
+      <label><input type="checkbox" id="overshoot-joint"> Joint overshoot (on skeleton motion)</label>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+      <button type="button" id="btn-action" disabled>Start action motion</button>
+      <button type="button" id="btn-joint" disabled>Apply joint overshoot</button>
+    </div>
+    <div class="preview-box" id="box-action-skel">
+      <div class="preview-label">Action skeleton video</div>
+      <img id="img-action-skel" alt="action skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
+      <video id="vid-action-skel" muted loop playsinline controls autoplay></video>
+    </div>
+  </section>
+
+  <!-- Step: SCAIL2 character drive (idle / action separate) -->
+  <section class="section locked" id="sec-scail" data-step="scail">
+    <div class="section-head">
+      <h2>5. SCAIL2 apply image</h2>
+      <span class="badge" id="badge-scail">locked</span>
+    </div>
+    <p class="pose-hint">
+      Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
+      (Idle SCAIL after idle skel; Action SCAIL after action skel.)
+    </p>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+      <button type="button" id="btn-scail-idle" disabled>SCAIL idle</button>
+      <span class="badge" id="badge-scail-idle">locked</span>
+      <button type="button" id="btn-scail-action" disabled>SCAIL action</button>
+      <span class="badge" id="badge-scail-action">locked</span>
+    </div>
+    <div class="preview-box" id="box-idle-video">
+      <div class="preview-label">Idle result</div>
+      <video id="vid-idle-video" muted loop playsinline controls autoplay></video>
+    </div>
+    <div class="preview-box" id="box-action-video">
+      <div class="preview-label">Action result</div>
+      <video id="vid-action-video" muted playsinline controls></video>
+    </div>
+  </section>
+
+  <!-- Step: time overshoot on final action video -->
+  <section class="section locked" id="sec-time" data-step="time">
+    <div class="section-head">
+      <h2>6. Time overshoot (action video)</h2>
+      <span class="badge" id="badge-time">locked</span>
+    </div>
+    <p class="pose-hint">
+      Optional. Spring playback remap on the final action character video only (no joint edit, no re-SCAIL).
+    </p>
+    <div class="checkboxes">
+      <label><input type="checkbox" id="overshoot-time"> Time overshoot (on final video)</label>
+    </div>
+    <button type="button" id="btn-time" disabled>Apply time overshoot</button>
+    <div class="preview-box" id="box-time-video">
+      <div class="preview-label">Timed action video</div>
+      <video id="vid-time-video" muted playsinline controls></video>
+    </div>
+  </section>
+
+  <!-- Combined click player -->
+  <section class="section locked" id="sec-play" data-step="play">
+    <div class="section-head">
+      <h2>7. Preview player</h2>
+      <span class="badge" id="badge-play">locked</span>
+    </div>
+    <p class="pose-hint">Loops idle; click to play action once, then back to idle.</p>
+    <div id="preview">
+      <video id="idleVideo" loop muted playsinline autoplay></video>
+      <video id="actionVideo" muted playsinline></video>
+    </div>
+  </section>
+
+  <!-- Background removal — always available, optional video upload -->
+  <section class="section" id="sec-bgremove" data-step="bgremove">
+    <div class="section-head">
+      <h2>8. Background removal</h2>
+      <span class="badge" id="badge-bgremove">ready</span>
+    </div>
+    <p class="pose-hint">
+      No pipeline prerequisites. Import any video, and/or process this session’s idle/action SCAIL mp4s if present.
+      Uses local <code>videoBGremoval</code>. Kill Comfy if VRAM is full.
+    </p>
+    <div>
+      <label for="bgremove-video">Import video (optional)</label>
+      <input type="file" id="bgremove-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv">
+      <p class="pose-hint" id="bgremove-video-name">No file chosen — will use session idle/action if checked.</p>
+    </div>
+    <div>
+      <label for="bgremove_model">Matting model</label>
+      <select id="bgremove_model" name="bgremove_model" style="width:100%;padding:0.4rem;box-sizing:border-box">
+        <option value="RVM MobileNetV3" selected>RVM MobileNetV3 (fast)</option>
+        <option value="RVM ResNet50">RVM ResNet50</option>
+        <option value="RMBG-2.0 HQ">RMBG-2.0 HQ (sharper edges)</option>
+      </select>
+    </div>
+    <div class="checkboxes">
+      <label><input type="checkbox" id="bgremove_idle"> Also session idle.mp4</label>
+      <label><input type="checkbox" id="bgremove_action"> Also session action.mp4</label>
+    </div>
+    <button type="button" id="btn-bgremove">Remove background</button>
+    <div class="preview-box" id="box-upload-nobg">
+      <div class="preview-label">Upload no-bg (preview)</div>
+      <video id="vid-upload-nobg" muted loop playsinline controls></video>
+    </div>
+    <div class="preview-box" id="box-idle-nobg">
+      <div class="preview-label">Idle no-bg (preview)</div>
+      <video id="vid-idle-nobg" muted loop playsinline controls></video>
+    </div>
+    <div class="preview-box" id="box-action-nobg">
+      <div class="preview-label">Action no-bg (preview)</div>
+      <video id="vid-action-nobg" muted playsinline controls></video>
+    </div>
+    <p class="pose-hint" id="bgremove-links"></p>
+  </section>
+
+  <div id="status"></div>
+  <div id="errors"></div>
 
   <script src="/web/app.js"></script>
 </body>

@@ -4,9 +4,11 @@ pelvis at seat height) -> write an all-frames pose-lock constraint.
 
 argv: <image> <out_constraint_json> [<T frames>] [<lock_mode>]
 
-lock_mode:
-  sitting — end-effector pin Hips+LeftFoot+RightFoot (upper body free)
-  lying   — fullbody lock of all joint rotations (skeleton locked to extract)
+lock_mode standing|sitting|lying — same pin set for all:
+  end-effector **Hips only** (pelvis pos+rot), all frames.
+  Arms AND legs stay free so action can use large limb swings.
+  Do not pin feet/hands — that killed action amplitude.
+  Fullbody-all-frames freezes motion entirely (rejected).
 """
 import sys
 import os
@@ -19,8 +21,8 @@ IMG = sys.argv[1]
 OUT = sys.argv[2]
 T = int(sys.argv[3]) if len(sys.argv) > 3 else 90
 LOCK_MODE = (sys.argv[4] if len(sys.argv) > 4 else "sitting").strip().lower()
-if LOCK_MODE not in ("sitting", "lying"):
-    sys.exit(f"unknown lock_mode {LOCK_MODE!r}; use sitting|lying")
+if LOCK_MODE not in ("standing", "sitting", "lying"):
+    sys.exit(f"unknown lock_mode {LOCK_MODE!r}; use standing|sitting|lying")
 
 MD = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-MotionDiff"
 KIM = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-Kimodo/kimodo"
@@ -89,23 +91,43 @@ frames = list(range(T))
 rots = [local.tolist()] * T
 roots = [[0.0, H, 0.0]] * T
 
-if LOCK_MODE == "lying":
-    # Full skeleton lock: all joint rotations pinned every frame.
-    constraints = [{
-        "type": "fullbody",
-        "frame_indices": frames,
-        "local_joints_rot": rots,
-        "root_positions": roots,
-    }]
-else:
-    # Sitting recipe: pin pelvis + feet; hips/knees/spine/arms free.
-    constraints = [{
-        "type": "end-effector",
-        "joint_names": ["Hips", "LeftFoot", "RightFoot"],
-        "frame_indices": frames,
-        "local_joints_rot": rots,
-        "root_positions": roots,
-    }]
+# Pelvis-only pin: keeps overall seat/lie root from drifting upright without
+# locking limbs. Hands and feet free for large action gestures.
+constraints = [{
+    "type": "end-effector",
+    "joint_names": ["Hips"],
+    "frame_indices": frames,
+    "local_joints_rot": rots,
+    "root_positions": roots,
+}]
 
-Path(OUT).write_text(json.dumps(constraints), encoding="utf-8")
-print("[phase1] wrote", OUT, flush=True)
+out_path = Path(OUT)
+out_path.write_text(json.dumps(constraints), encoding="utf-8")
+# Save extract FK pose for idle anchoring (pose positions [22,3]).
+try:
+    g_pose = skel.fk(
+        axis_angle_to_matrix(torch.tensor(local)[None].float()),
+        torch.tensor([[0.0, H, 0.0]]).float(),
+    )[1][0].numpy()
+    pose_path = out_path.parent / "extract_pose.npy"
+    np.save(pose_path, g_pose.astype(np.float64))
+    print("[phase1] wrote", OUT, "and", pose_path, flush=True)
+except Exception as exc:
+    print("[phase1] wrote", OUT, f"(extract_pose failed: {exc})", flush=True)
+
+# Explicit CUDA teardown before process exit (Windows holds VRAM otherwise).
+try:
+    del model, det, batch, out
+except Exception:
+    pass
+try:
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
+    print("[phase1] VRAM after unload:", vram(), flush=True)
+except Exception as exc:
+    print("[phase1] VRAM unload warning:", exc, flush=True)
