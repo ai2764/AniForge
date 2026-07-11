@@ -13,7 +13,7 @@
 - **All product text (code, comments, string literals, UI, committed data) is English only — no Chinese.**
 - Independent from camera-lab: separate repo/process/port; only shared dependency is ComfyUI at `http://127.0.0.1:8188`.
 - Reuse pipeline scripts by **vendoring copies** into this repo (`pipeline/`); do not import across repos.
-- Backend default port **8500**. ComfyUI input dir: `C:/Users/AIBOX/dev/ComfyUI-scail/input`. ComfyUI output fetched via `/view`.
+- Backend default port **8500**. ComfyUI input dir: `$COMFYUI_SCAIL_ROOT/input`. ComfyUI output fetched via `/view`.
 - Overshoot options apply to the **action** clip only; joint overshoot in skeleton space, time overshoot on the rendered video; both may be selected (they stack).
 - Chosen time-spring params: `B0.42 D4.2 F2.4 T1.15`. Default joint-spring: `omega 20, zeta 0.35, soft 1.0`.
 
@@ -29,7 +29,7 @@ Research/enablement task — get Kimodo text-to-motion producing an NPZ on Comfy
 **Context:**
 - `ComfyUI-Kimodo` (jtydhr88) is installed and its 9 nodes load. `Kimodo-SOMA-RP-v1` (public) + Llama-3-8B-Instruct encoder (gated, access granted, ~15GB cached at `F:/AIModelArchive/CDriveOffload_20260514/caches/huggingface/hub`).
 - Blocker: `Kimodo_LoadModel` fails — `LLM2VecEncoder` → `gptqmodel 7.1.0` raises `ImportError('gptqmodel requires optimum version 1.24.0 or higher')` AND `gptqmodel` itself fails to import with `ModuleNotFoundError: No module named 'pcre'`. `optimum 2.2.0` is installed but `optimum.__version__` is absent (may break gptqmodel's version probe).
-- Comfy python: `C:/Users/AIBOX/anaconda3/envs/comfy-scail/python.exe`.
+- Comfy python: `$COMFY_PYTHON`.
 
 - [ ] **Step 1: Reproduce and read the encoder loader**
 
@@ -366,7 +366,7 @@ def build_kimodo_graph(prompt, duration=3.0, seed=42,
 
 def generate_motion(client: ComfyClient, prompt, out_npz: Path, *,
                     duration=3.0, seed=42, model="Kimodo-SOMA-RP-v1", steps=50,
-                    comfy_output=Path("C:/Users/AIBOX/dev/ComfyUI-scail/output")):
+                    comfy_output=Path("$COMFYUI_SCAIL_ROOT/output")):
     graph = build_kimodo_graph(prompt, duration, seed, model, steps)
     pid = client.submit(graph, f"mp-kim-{uuid.uuid4().hex[:6]}")
     entry = client.wait(pid)

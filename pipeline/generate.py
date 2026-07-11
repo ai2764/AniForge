@@ -511,8 +511,14 @@ def _build_guide(client, prompt, npz_path, skel_path, guide_path, *,
 def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
              run_dir: Path, client, *, motion_model="Kimodo-SOMA-RP-v1", seed=None,
              scale=1.0,
-             comfy_input=Path("C:/Users/AIBOX/dev/ComfyUI-scail/input"),
-             comfy_output=Path("C:/Users/AIBOX/dev/ComfyUI-scail/output")) -> dict:
+             comfy_input: Path | None = None,
+             comfy_output: Path | None = None) -> dict:
+    from pipeline.paths import comfy_input_dir, comfy_output_dir
+
+    if comfy_input is None:
+        comfy_input = comfy_input_dir()
+    if comfy_output is None:
+        comfy_output = comfy_output_dir()
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     image = Path(image)

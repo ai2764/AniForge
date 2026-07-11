@@ -36,8 +36,14 @@ def build_scail_graph(template, guide_name, ref_name, width, height, length,
 def drive_character(client: ComfyClient, guide_mp4: Path, ref_image: Path, out_mp4: Path, *,
                      width=480, height=832, length, pose_strength=0.9, seed=42, steps=10,
                      cfg=3.0, prefix="mp_body", positive, negative=None,
-                     comfy_input=Path("C:/Users/AIBOX/dev/ComfyUI-scail/input"),
+                     comfy_input: Path | None = None,
                      template_path=ASSET_TEMPLATE) -> Path:
+    from pipeline.paths import comfy_input_dir
+
+    if comfy_input is None:
+        comfy_input = comfy_input_dir()
+    comfy_input = Path(comfy_input)
+    comfy_input.mkdir(parents=True, exist_ok=True)
     guide_mp4 = Path(guide_mp4)
     ref_image = Path(ref_image)
     guide_name = ComfyClient.stage_input(guide_mp4, guide_mp4.name, comfy_input)

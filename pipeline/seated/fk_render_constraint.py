@@ -5,17 +5,30 @@ code path Kimodo uses to read the constraint), so no reimplementation drift.
 Renders rest pose (identity) + constraint pose, front (XY) + side (ZY), and prints
 quantitative sit-metrics.
 """
-import sys, os, json
+import json
+import os
+import sys
+from pathlib import Path
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import numpy as np, torch, cv2
+import cv2
+import numpy as np
+import torch
 
-KIM = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-Kimodo/kimodo"
+_REPO = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO))
+from pipeline.paths import kimodo_package_dir
+
+KIM = str(kimodo_package_dir())
 sys.path.insert(0, KIM)
-from kimodo.skeleton.definitions import SMPLXSkeleton22
 from kimodo.constraints import load_constraints_lst
+from kimodo.skeleton.definitions import SMPLXSkeleton22
 
-CJSON = r"C:/Users/AIBOX/.claude/jobs/4b35e22a/tmp/sitting_constraints.json"
-OUT   = r"C:/Users/AIBOX/AppData/Local/Temp/claude/C--Users-AIBOX-dev-motion-portrait/a89c1fb2-249e-404d-b1e4-bb41d0c47b8f/scratchpad/constraint_fk.png"
+# Dev one-off: pass paths via argv or env CONSTRAINT_JSON / OUT_PNG
+CJSON = os.environ.get("CONSTRAINT_JSON") or (sys.argv[1] if len(sys.argv) > 1 else "")
+OUT = os.environ.get("OUT_PNG") or (sys.argv[2] if len(sys.argv) > 2 else "constraint_fk.png")
+if not CJSON or not Path(CJSON).is_file():
+    raise SystemExit("usage: fk_render_constraint.py <constraint.json> [out.png]")
 
 NAMES = ["pelvis","L_hip","R_hip","spine1","L_knee","R_knee","spine2","L_ankle",
          "R_ankle","spine3","L_foot","R_foot","neck","L_collar","R_collar","head",

@@ -22,10 +22,18 @@ from pipeline.stages import (
     stage_time_overshoot,
 )
 
-IMAGE = Path(
-    r"C:\Users\AIBOX\dev\youtube-video-lab\tasks\live2d\opening-images\立绘"
-    r"\ChatGPT Image 2026年7月9日 21_37_02.png"
-)
+# Prefer STANDEE_IMAGE; else STANDEE_DIR/mage.png
+import os
+from pipeline.paths import standee_dir
+
+_si = os.environ.get("STANDEE_IMAGE", "").strip()
+_sd = standee_dir()
+if _si:
+    IMAGE = Path(_si)
+elif _sd is not None:
+    IMAGE = Path(_sd) / "mage.png"
+else:
+    IMAGE = Path("")
 ACTION = (
     "Dramatic mage cast: sweep the right arm up in a wide high arc above the "
     "shoulder, palm open gathering energy, chest opens slightly; then thrust "

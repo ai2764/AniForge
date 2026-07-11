@@ -21,8 +21,8 @@ def main(argv=None):
     p.add_argument(
         "image",
         nargs="?",
-        default=r"C:/Users/AIBOX/dev/ComfyUI-scail/input/mp_sitting.png",
-        help="Reference character image",
+        default=None,
+        help="Reference character image (required)",
     )
     p.add_argument("--pose", choices=("sitting", "lying"), default="sitting")
     p.add_argument("--action", default="A person gestures energetically with arms and upper body.")
@@ -31,7 +31,11 @@ def main(argv=None):
     p.add_argument("--run-dir", default=None)
     args = p.parse_args(argv)
 
+    if not args.image:
+        p.error("image path is required")
     image = Path(args.image)
+    if not image.is_file():
+        p.error(f"image not found: {image}")
     run_dir = Path(args.run_dir) if args.run_dir else Path(__file__).resolve().parent / "runs" / args.pose
     run_dir.mkdir(parents=True, exist_ok=True)
 

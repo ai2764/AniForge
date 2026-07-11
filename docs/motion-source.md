@@ -1,17 +1,16 @@
 # Motion Source — Kimodo-SOMA (operational)
 
 Kimodo is the mandatory motion source for this project (no HY-Motion fallback).
-As of 2026-07-08 it is operational on ComfyUI-scail:8188.
+Point AniForge at your ComfyUI-scail install via `COMFYUI_SCAIL_ROOT` (see `.env.example`).
 
 ## What works
 
-- Node pack: `jtydhr88/ComfyUI-Kimodo` (9 nodes) in `ComfyUI-scail/custom_nodes`.
+- Node pack: `jtydhr88/ComfyUI-Kimodo` (9 nodes) under `ComfyUI-scail/custom_nodes`.
 - Checkpoint: `Kimodo-SOMA-RP-v1` (public, ~1GB). Text encoder: LLM2Vec over
-  `meta-llama/Meta-Llama-3-8B-Instruct` (gated — access granted for `ai2764`;
-  ~15GB cached at `F:/AIModelArchive/CDriveOffload_20260514/caches/huggingface/hub`).
-- Comfy env python: `C:/Users/AIBOX/anaconda3/envs/comfy-scail/python.exe`.
+  `meta-llama/Meta-Llama-3-8B-Instruct` (Hugging Face gated — request access;
+  weights cache under your local HF hub directory).
+- Optional: set `COMFY_PYTHON` to the env that has Kimodo/torch deps.
 - Graph: `Kimodo_LoadModel → Kimodo_TextEncode → Kimodo_Sampler → Kimodo_PostProcess → Kimodo_SaveNPZ`.
-  A 3.0s / 50-step SOMA generation runs in ~56s on the RTX 4090.
 
 ## NPZ output format (from `Kimodo_SaveNPZ`)
 

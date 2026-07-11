@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import traceback
@@ -20,7 +21,8 @@ from pipeline.stages import (
     stage_scail,
 )
 
-IMAGE = Path(r"C:\Users\AIBOX\Downloads\ChatGPT Image 2026年7月8日 13_00_08.png")
+# Require DEMO_IMAGE env or pass path as argv[1]
+IMAGE = Path(os.environ["DEMO_IMAGE"]) if os.environ.get("DEMO_IMAGE") else None
 ACTION = (
     "Raise the right hand to shoulder height with a clear small wave, "
     "then lower it slightly. Mouth closed and still."
@@ -37,9 +39,14 @@ def log(msg: str) -> None:
 
 
 def main() -> int:
-    if not IMAGE.is_file():
-        log(f"ERROR: image not found: {IMAGE}")
+    img = IMAGE
+    if img is None and len(sys.argv) > 1:
+        img = Path(sys.argv[1])
+    if img is None or not img.is_file():
+        log("ERROR: set DEMO_IMAGE or pass image path as argv[1]")
         return 1
+    global IMAGE
+    IMAGE = img
 
     log("=== free Comfy VRAM (best effort) ===")
     try:

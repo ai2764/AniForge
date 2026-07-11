@@ -5,6 +5,7 @@ Order: session → extract → idle → action → SCAIL idle/action → bgremov
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import traceback
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from pipeline.comfy import ComfyClient
+from pipeline.paths import standee_dir
 from pipeline.stages import (
     create_session,
     stage_action,
@@ -23,9 +25,8 @@ from pipeline.stages import (
     stage_scail,
 )
 
-INPUT_DIR = Path(
-    r"C:\Users\AIBOX\dev\youtube-video-lab\tasks\live2d\opening-images\立绘"
-)
+_sd = standee_dir()
+INPUT_DIR = Path(_sd) if _sd else Path(os.environ.get("STANDEE_DIR") or ".")
 OUT_LOG = ROOT / "runs" / "_standees_batch_log.txt"
 BATCH_SUMMARY = ROOT / "runs" / "_standees_batch_summary.json"
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -87,7 +88,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--mannequin",
-        default=r"C:\Users\AIBOX\dev\youtube-video-lab\tasks\live2d\L2D-original\neutral_mannequin_front_9x16.png",
+        default=os.environ.get("MANNEQUIN_IMAGE") or "",
     )
     ap.add_argument(
         "--character",
@@ -105,9 +106,12 @@ def main() -> int:
         print(f"missing source run: {src}", file=sys.stderr)
         return 2
 
-    mannequin = Path(args.mannequin)
+    mannequin = Path(args.mannequin) if args.mannequin else Path("")
     if not mannequin.is_file():
-        print(f"missing mannequin: {mannequin}", file=sys.stderr)
+        print(
+            "missing mannequin image: pass --mannequin or set MANNEQUIN_IMAGE",
+            file=sys.stderr,
+        )
         return 2
 
     meta_src = json.loads((src / "meta.json").read_text(encoding="utf-8"))

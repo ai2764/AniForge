@@ -9,9 +9,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-KIM = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-Kimodo/kimodo"
+_REPO = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO))
+from pipeline.paths import kimodo_package_dir
+
+KIM = str(kimodo_package_dir())
 sys.path.insert(0, KIM)
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from kimodo.constraints import axis_angle_to_matrix
 from kimodo.skeleton.definitions import SMPLXSkeleton22

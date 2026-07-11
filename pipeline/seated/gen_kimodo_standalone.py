@@ -23,7 +23,11 @@ import subprocess
 from pathlib import Path
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-KIM = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-Kimodo/kimodo"
+_REPO = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO))
+from pipeline.paths import comfy_output_dir, kimodo_package_dir
+
+KIM = str(kimodo_package_dir())
 sys.path.insert(0, KIM)
 import numpy as np
 import torch
@@ -46,7 +50,7 @@ def _legacy_job():
     cjson = sys.argv[1]
     idle_prefix = sys.argv[2] if len(sys.argv) > 2 else "kimodo_saidle"
     action_prefix = sys.argv[3] if len(sys.argv) > 3 else "kimodo_saaction"
-    outdir = r"C:/Users/AIBOX/dev/ComfyUI-scail/output"
+    outdir = str(comfy_output_dir())
     return {
         "constraint_json": cjson,
         "outdir": outdir,
@@ -92,7 +96,7 @@ _raw_cjson = job.get("constraint_json") or ""
 CJSON = str(_raw_cjson).strip() if _raw_cjson else ""
 if CJSON and not Path(CJSON).is_file():
     sys.exit(f"constraint_json not found: {CJSON}")
-OUTDIR = Path(job.get("outdir") or r"C:/Users/AIBOX/dev/ComfyUI-scail/output")
+OUTDIR = Path(job.get("outdir") or comfy_output_dir())
 OUTDIR.mkdir(parents=True, exist_ok=True)
 SEED = int(job.get("seed") or 42)
 DUR = float(job.get("duration") or 3.0)

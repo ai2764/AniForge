@@ -11,10 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-# Sibling repo by default; override with VIDEO_BG_REMOVAL_ROOT.
-DEFAULT_VBG_ROOT = Path(
-    os.environ.get("VIDEO_BG_REMOVAL_ROOT", r"C:\Users\AIBOX\dev\videoBGremoval")
-)
+from pipeline.paths import comfy_python, video_bg_removal_root
 
 # Models accepted by videoBGremoval.matting.create_engine
 BG_MODELS = (
@@ -25,13 +22,15 @@ BG_MODELS = (
 
 
 def resolve_vbg_root(root: Path | None = None) -> Path:
-    p = Path(root or DEFAULT_VBG_ROOT)
-    if not p.is_dir():
-        raise FileNotFoundError(
-            f"videoBGremoval not found at {p}. "
-            "Clone it or set VIDEO_BG_REMOVAL_ROOT."
-        )
-    return p.resolve()
+    if root is not None:
+        p = Path(root)
+        if not p.is_dir():
+            raise FileNotFoundError(
+                f"videoBGremoval not found at {p}. "
+                "Clone it or set VIDEO_BG_REMOVAL_ROOT."
+            )
+        return p.resolve()
+    return video_bg_removal_root().resolve()
 
 
 def resolve_vbg_python(root: Path) -> str:
@@ -42,12 +41,7 @@ def resolve_vbg_python(root: Path) -> str:
     ):
         if cand.is_file():
             return str(cand)
-    # Fallback: same as comfy-scail env if set
-    comfy = Path(r"C:\Users\AIBOX\anaconda3\envs\comfy-scail\python.exe")
-    if comfy.is_file():
-        return str(comfy)
-    import sys
-    return sys.executable
+    return comfy_python()
 
 
 def run_bgremove(

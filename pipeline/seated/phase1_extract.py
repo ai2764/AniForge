@@ -24,8 +24,12 @@ LOCK_MODE = (sys.argv[4] if len(sys.argv) > 4 else "sitting").strip().lower()
 if LOCK_MODE not in ("standing", "sitting", "lying"):
     sys.exit(f"unknown lock_mode {LOCK_MODE!r}; use standing|sitting|lying")
 
-MD = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-MotionDiff"
-KIM = r"C:/Users/AIBOX/dev/ComfyUI-scail/custom_nodes/ComfyUI-Kimodo/kimodo"
+_REPO = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO))
+from pipeline.paths import kimodo_package_dir, motiondiff_root
+
+MD = str(motiondiff_root())
+KIM = str(kimodo_package_dir())
 sys.path.insert(0, MD)
 sys.path.insert(0, KIM)
 import torch

@@ -1,4 +1,28 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime outputs (can be large / private)
 runs/
 pipeline/seated/runs/
+.comfy/
+
+# Scratch / local junk
+_tmp*
+body.txt
+body2.txt
+*.local.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

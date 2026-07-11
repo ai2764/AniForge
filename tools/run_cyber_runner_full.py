@@ -22,9 +22,17 @@ from pipeline.stages import (
     stage_time_overshoot,
 )
 
-IMAGE = Path(
-    r"C:\Users\AIBOX\dev\youtube-video-lab\tasks\live2d\opening-images\立绘\cyber runner.png"
-)
+import os
+from pipeline.paths import standee_dir
+
+_si = os.environ.get("STANDEE_IMAGE", "").strip()
+_sd = standee_dir()
+if _si:
+    IMAGE = Path(_si)
+elif _sd is not None:
+    IMAGE = Path(_sd) / "cyber runner.png"
+else:
+    IMAGE = Path("")
 # Cool, dynamic upper-body cyber action; mouth locked.
 ACTION = (
     "Explosive cyber combat ready: snap both hands up into a sharp dual-pistol "

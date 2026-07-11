@@ -1,0 +1,5 @@
+run_id: b814053601c843cb998d5997c30df8f0
+action_prompt: Slowly bring both hands to the waist and rest them firmly on the hips in a relaxed hands-on-hips pose, then hold still. Smooth, gentle, soft motion, not snappy. Both arms move together; clipboard can settle at the hip if needed. Torso upright, hips and feet fixed, no stepping, no twist. Mouth closed and still, lips sealed, silent, no
+seed: 42
+size: 720x1280
+bgremove_model: RMBG-2.0 HQ

@@ -29,14 +29,16 @@ from pipeline.stages import (
     stage_time_overshoot,
 )
 
-STANDING_DIR = Path(
-    r"C:\Users\AIBOX\dev\youtube-video-lab\tasks\live2d\opening-images\立绘"
-)
+# Set STANDEE_DIR env or pass --image; no machine-specific default.
+from pipeline.paths import standee_dir as _standee_dir
 
+STANDING_DIR = _standee_dir()
+
+# filename relative to STANDEE_DIR when using --preset
 PRESETS: dict[str, dict] = {
     "mecha2": {
         "slug": "mecha_pilot2",
-        "image": STANDING_DIR / "mecha polit2.png",
+        "image_name": "mecha polit2.png",
         # Single clean beat only — multi-step prompts often look broken in Kimodo.
         "action": (
             "Raise the right hand straight up beside the temple in one clear "
@@ -48,7 +50,7 @@ PRESETS: dict[str, dict] = {
     },
     "nurse": {
         "slug": "nurse",
-        "image": STANDING_DIR / "nurse.png",
+        "image_name": "nurse.png",
         "action": (
             "Slowly bring both hands to the waist and rest them firmly on the "
             "hips in a relaxed hands-on-hips pose, then hold still. Smooth, "
@@ -234,14 +236,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
+    def _preset_image(pr: dict) -> Path:
+        base = STANDING_DIR
+        if base is None:
+            p.error(
+                "STANDEE_DIR is not set. Export STANDEE_DIR to your standee folder, "
+                "or pass --image explicitly."
+            )
+        return Path(base) / pr["image_name"]
+
     jobs: list[tuple[str, Path, str]] = []
     if args.all_remaining:
         for key in ("mecha2", "nurse"):
             pr = PRESETS[key]
-            jobs.append((pr["slug"], pr["image"], pr["action"]))
+            jobs.append((pr["slug"], _preset_image(pr), pr["action"]))
     elif args.preset:
         pr = PRESETS[args.preset]
-        jobs.append((pr["slug"], pr["image"], pr["action"]))
+        img = args.image if args.image else _preset_image(pr)
+        jobs.append((pr["slug"], img, pr["action"]))
     else:
         if not args.slug or not args.image or not args.action:
             p.error("need --preset / --all-remaining / or --slug --image --action")

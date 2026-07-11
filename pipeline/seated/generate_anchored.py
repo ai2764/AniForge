@@ -126,12 +126,8 @@ def render_smplx_guide(
 def _pyexe() -> str:
     if PYEXE and Path(PYEXE).is_file():
         return PYEXE
-    # Prefer the comfy-scail env where HMR2 / Kimodo deps live.
-    cand = Path(r"C:/Users/AIBOX/anaconda3/envs/comfy-scail/python.exe")
-    if cand.is_file():
-        return str(cand)
-    import sys
-    return sys.executable
+    from pipeline.paths import comfy_python
+    return comfy_python()
 
 
 def _run_subprocess(name: str, args: list[str]) -> None:
@@ -170,13 +166,17 @@ def generate_anchored(
     scale: float = 1.0,
     duration: float = 3.0,
     n_frames: int = 90,
-    comfy_input: Path = Path("C:/Users/AIBOX/dev/ComfyUI-scail/input"),
+    comfy_input: Path | None = None,
 ) -> dict:
     """Pose-anchored generate. pose_mode in {standing, sitting, lying}.
 
     All modes: HMR extract + pin pelvis (Hips) only — limbs free.
     Action prompt is required; idle falls back to DEFAULT_IDLE_PROMPT.
     """
+    from pipeline.paths import comfy_input_dir
+
+    if comfy_input is None:
+        comfy_input = comfy_input_dir()
     pose_mode = (pose_mode or "sitting").strip().lower()
     if pose_mode not in ("standing", "sitting", "lying"):
         raise ValueError(f"pose_mode must be standing|sitting|lying, got {pose_mode!r}")

@@ -23,7 +23,12 @@ def build_kimodo_graph(prompt, duration=3.0, seed=42,
 
 def generate_motion(client: ComfyClient, prompt, out_npz: Path, *,
                     duration=3.0, seed=42, model="Kimodo-SOMA-RP-v1", steps=50,
-                    comfy_output=Path("C:/Users/AIBOX/dev/ComfyUI-scail/output")):
+                    comfy_output: Path | None = None):
+    from pipeline.paths import comfy_output_dir
+
+    if comfy_output is None:
+        comfy_output = comfy_output_dir()
+    comfy_output = Path(comfy_output)
     graph = build_kimodo_graph(prompt, duration, seed, model, steps)
     pid = client.submit(graph, f"mp-kim-{uuid.uuid4().hex[:6]}")
     entry = client.wait(pid)
