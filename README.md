@@ -5,8 +5,8 @@
 Turn a single character standee (立绘) + action text into a Live2D-style pair of clips: a looping **idle** and a one-shot **action** you can click to play.
 
 Example assets below come from a full **Run all** session  
-`runs/b814053601c843cb998d5997c30df8f0` (nurse, 720×1280, seed 42, RMBG-2.0 HQ).  
-Frames: idle @ **0.5s**, action @ **1.1s** (hands-on-hips hold).
+`runs/0d04d189a7d045ebaeb5fa7ae7ee6895` (720×1280, seed 801854411, RMBG-2.0 HQ).  
+Frames: idle @ **0.5s**, action @ **0.7s** (puppy-paw pose peak).
 
 ---
 
@@ -27,11 +27,10 @@ Frames: idle @ **0.5s**, action @ **1.1s** (hands-on-hips hold).
 ### Example action prompt
 
 ```text
-Slowly bring both hands to the waist and rest them firmly on the hips in a
-relaxed hands-on-hips pose, then hold still. Smooth, gentle, soft motion,
-not snappy. Both arms move together; clipboard can settle at the hip if
-needed. Torso upright, hips and feet fixed, no stepping, no twist.
-Mouth closed and still, lips sealed, silent, no talking.
+Quickly raises both hands to chest height in a cute puppy-paw pose,
+elbows bent and wrists relaxed downward. Mouth closed and still the
+entire time, lips sealed, silent, no talking, no speaking, no lip
+movement, no chewing.
 ```
 
 ---
@@ -64,7 +63,7 @@ Kimodo idle motion + breath shaping; arms/legs locked.
 
 ### 3 · Action skeleton
 
-Kimodo action (+ optional joint overshoot). Frame at **1.1s** (hips hold).
+Kimodo action (+ optional joint overshoot). Frame at **0.7s** (puppy-paw peak).
 
 ![action skeleton](docs/readme-assets/thumbs/04_action_skel.png)
 

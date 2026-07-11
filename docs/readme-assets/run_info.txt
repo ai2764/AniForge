@@ -1,18 +1,20 @@
-run_id: b814053601c843cb998d5997c30df8f0
-action_prompt: Slowly bring both hands to the waist and rest them firmly on the hips in a relaxed hands-on-hips pose, then hold still. Smooth, gentle, soft motion, not snappy. Both arms move together; clipboard can settle at the hip if needed. Torso upright, hips and feet fixed, no stepping, no twist. Mouth closed and still, lips sealed, silent, no
-seed: 42
+run_id: 0d04d189a7d045ebaeb5fa7ae7ee6895
+character: fox-girl
+action_prompt: Quickly raises both hands to chest height in a cute puppy-paw pose, elbows bent and wrists relaxed downward. Mouth closed and still the entire time, lips sealed, silent, no talking, no speaking, no lip movement, no chewing.
+seed: 801854411
 size: 720x1280
 bgremove_model: RMBG-2.0 HQ
-
-# showcase frame timestamps (ffmpeg -ss)
-idle_frame_s: 0.5
-  sources: idle_skel.mp4, idle.mp4, idle_nobg.mp4
-action_frame_s: 1.1
-  sources: action_skel.mp4, action.mp4, action_nobg.mp4, action_timed.mp4
-  selection: sampled action_skel/action at 0.3, 0.6, 0.8, 0.9, 1.0, 1.1, 1.2, 1.5s;
-    also used SMPL posed_joints (action_seed42.npz) — min wrist–hip |y| gap at frame 33
-    (~1.1s @ 30fps) and strong elbow bend (~0.9–1.1s). Chose 1.1s as hands-on-hips hold.
-  candidates saved as: _cand_action_skel_*.png, _cand_action_*.png
-extract: copy extract_skel.png (static)
-input: copy input.png
-thumbs: docs/readme-assets/thumbs/ scale width=280 keep aspect
+idle_timestamp: 0.5s
+action_timestamp: 0.7s
+action_timestamp_reason: Sampled action_skel/action at 0.3,0.5,0.7,0.9,1.0,1.1,1.3,1.5s. Peak puppy-paw (both fists high near chest/face, clear raised hands) at 0.7s. Earlier frames mid-raise; later frames hold with one hand nearer mouth.
+assets:
+  01_input.png        <- input.png
+  02_extract.png      <- extract_skel.png
+  03_idle_skel.png    <- idle_skel.mp4 @ 0.5s
+  04_action_skel.png  <- action_skel.mp4 @ 0.7s
+  05_idle.png         <- idle.mp4 @ 0.5s
+  06_action.png       <- action.mp4 @ 0.7s
+  07_idle_nobg.png    <- idle_nobg.mp4 @ 0.5s
+  08_action_nobg.png  <- action_nobg.mp4 @ 0.7s
+  09_action_timed.png <- action_timed.mp4 @ 0.7s
+thumbs: scale=280:-1
