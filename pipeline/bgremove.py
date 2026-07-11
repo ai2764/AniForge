@@ -18,9 +18,9 @@ DEFAULT_VBG_ROOT = Path(
 
 # Models accepted by videoBGremoval.matting.create_engine
 BG_MODELS = (
+    "RMBG-2.0 HQ",
     "RVM MobileNetV3",
     "RVM ResNet50",
-    "RMBG-2.0 HQ",
 )
 
 
@@ -54,7 +54,7 @@ def run_bgremove(
     input_video: Path,
     output_dir: Path,
     *,
-    model: str = "RVM MobileNetV3",
+    model: str = "RMBG-2.0 HQ",
     formats: str = "webm",
     bg_image: Path | None = None,
     fp16: bool = True,
@@ -151,3 +151,70 @@ def run_bgremove(
                 outputs.append(cand)
 
     return {"preview": preview, "outputs": outputs, "log": log}
+
+
+def resolve_ffmpeg(vbg_root: Path | None = None) -> str:
+    """Prefer videoBGremoval portable ffmpeg, then FFMPEG_PATH, then PATH."""
+    env_ff = os.environ.get("FFMPEG_PATH")
+    if env_ff and Path(env_ff).is_file():
+        return env_ff
+    try:
+        root = resolve_vbg_root(vbg_root)
+        portable = root / "portable" / "ffmpeg" / "bin" / "ffmpeg.exe"
+        if portable.is_file():
+            return str(portable)
+    except FileNotFoundError:
+        pass
+    which = shutil.which("ffmpeg")
+    if which:
+        return which
+    return "ffmpeg"
+
+
+def webm_to_prores_alpha(
+    webm_path: Path,
+    mov_path: Path,
+    *,
+    vbg_root: Path | None = None,
+) -> Path:
+    """Convert VP9+alpha WebM to CapCut-friendly ProRes 4444 MOV with real alpha.
+
+    Must decode with libvpx-vp9 — the default VP9 decoder drops the alpha plane
+    and yields opaque black-background frames (broken for NLE compositing).
+    """
+    webm_path = Path(webm_path)
+    mov_path = Path(mov_path)
+    if not webm_path.is_file():
+        raise FileNotFoundError(f"webm not found: {webm_path}")
+    mov_path.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg = resolve_ffmpeg(vbg_root)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-c:v",
+        "libvpx-vp9",
+        "-i",
+        str(webm_path.resolve()),
+        "-c:v",
+        "prores_ks",
+        "-profile:v",
+        "4444",
+        "-pix_fmt",
+        "yuva444p10le",
+        "-an",
+        str(mov_path.resolve()),
+    ]
+    print(f"[bgremove] alpha mov: {' '.join(cmd)}", flush=True)
+    r = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if r.returncode != 0 or not mov_path.is_file() or mov_path.stat().st_size < 1000:
+        tail = ((r.stdout or "") + "\n" + (r.stderr or ""))[-1500:]
+        raise RuntimeError(
+            f"webm→ProRes alpha failed (exit {r.returncode}):\n{tail}"
+        )
+    return mov_path

@@ -1,4 +1,4 @@
-"""Standalone CLI for the Motion Portrait pipeline — no web server needed.
+"""Standalone CLI for the AniForge pipeline — no web server needed.
 
 Runs the full flow (Kimodo motion -> optional joint spring -> SCAIL2 character
 drive -> optional time spring) for one image + prompts, and writes idle.mp4 and

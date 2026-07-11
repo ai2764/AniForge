@@ -15,6 +15,10 @@
   const btnJoint = document.getElementById("btn-joint");
   const btnScailIdle = document.getElementById("btn-scail-idle");
   const btnScailAction = document.getElementById("btn-scail-action");
+  const btnScailDefaults = document.getElementById("btn-scail-defaults");
+  const scailIdlePositiveEl = document.getElementById("scail_idle_positive");
+  const scailActionPositiveEl = document.getElementById("scail_action_positive");
+  const scailNegativeEl = document.getElementById("scail_negative");
   const btnTime = document.getElementById("btn-time");
   const btnBgremove = document.getElementById("btn-bgremove");
   const chkJoint = document.getElementById("overshoot-joint");
@@ -64,6 +68,8 @@
   const bgremoveLinks = document.getElementById("bgremove-links");
   const bgVideoInput = document.getElementById("bgremove-video");
   const bgVideoName = document.getElementById("bgremove-video-name");
+  const timeVideoInput = document.getElementById("time-video");
+  const timeVideoName = document.getElementById("time-video-name");
 
   const preview = document.getElementById("preview");
   const idleVideo = document.getElementById("idleVideo");
@@ -145,9 +151,9 @@
   const actionDurLabel = document.getElementById("action_duration_label");
 
   function idleMotionKeepValue() {
-    if (!idleKeepInput) return 0.06;
+    if (!idleKeepInput) return 0.08;
     let k = parseFloat(idleKeepInput.value);
-    if (!(k >= 0)) k = 0.06;
+    if (!(k >= 0)) k = 0.08;
     return Math.max(0, Math.min(1, k));
   }
 
@@ -372,7 +378,10 @@
       btnScailAction.disabled = on || !runId || !actionSkelReady;
     }
     if (btnTime) {
-      btnTime.disabled = on || !runId || !actionScailReady;
+      // Always unlocked: session run_id and/or uploaded video.
+      const hasTimeFile =
+        timeVideoInput && timeVideoInput.files && timeVideoInput.files[0];
+      btnTime.disabled = on || (!runId && !hasTimeFile);
     }
     if (btnBgremove) {
       // Always available: upload and/or session videos (no pipeline lock).
@@ -389,6 +398,11 @@
     errorsEl.textContent = "";
   }
 
+  /**
+   * POST multipart form. Throws only on hard failure.
+   * Soft warnings (data.warnings) never throw; non-empty data.errors throws
+   * only when HTTP is not ok OR there is no usable success payload.
+   */
   async function postForm(url, formData) {
     const res = await fetch(url, { method: "POST", body: formData });
     const text = await res.text();
@@ -398,16 +412,42 @@
     } catch (_) {
       data = { error: text || res.statusText, raw: true };
     }
-    if (!res.ok) {
+    const hasErrors = data.errors && Object.keys(data.errors).length > 0;
+    // Success signals used by staged endpoints (any one is enough).
+    const hasSuccess =
+      data.action ||
+      data.action_timed ||
+      data.action_nobg ||
+      data.idle ||
+      data.idle_nobg ||
+      data.upload_nobg ||
+      data.idle_nobg_alpha ||
+      data.action_nobg_alpha ||
+      data.upload_nobg_alpha ||
+      data.action_nobg_webm ||
+      data.idle_skel ||
+      data.action_skel ||
+      data.extract_png ||
+      data.extract_skel ||
+      data.run_id && (data.time_source || data.step);
+    if (!res.ok && !hasSuccess) {
       const msg =
         data.error ||
         data.errors ||
         (Object.keys(data).length ? data : null) ||
-        (res.status + " " + (res.statusText || "error") + (text ? ": " + text.slice(0, 200) : ""));
+        (res.status +
+          " " +
+          (res.statusText || "error") +
+          (text ? ": " + text.slice(0, 200) : ""));
       throw msg;
     }
-    if (data.errors && Object.keys(data.errors).length) {
+    // Hard errors only when nothing useful was produced.
+    if (hasErrors && !hasSuccess) {
       throw data.errors;
+    }
+    // Surface soft errors/warnings without failing the step.
+    if (hasErrors && hasSuccess) {
+      data.warnings = Object.assign({}, data.warnings || {}, data.errors);
     }
     return data;
   }
@@ -430,12 +470,18 @@
     if (secScail && badgeScail) lock(secScail, badgeScail, "locked");
     if (badgeScailIdle) setBadge(badgeScailIdle, "locked", "");
     if (badgeScailAction) setBadge(badgeScailAction, "locked", "");
-    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
+    // Time overshoot always unlocked (like bgremove).
+    if (secTime) secTime.classList.remove("locked");
+    if (badgeTime) setBadge(badgeTime, "ready", "");
+    if (btnTime) {
+      const hasTimeFile =
+        timeVideoInput && timeVideoInput.files && timeVideoInput.files[0];
+      btnTime.disabled = !runId && !hasTimeFile;
+    }
     lock(secPlay, badgePlay, "locked");
     if (btnJoint) btnJoint.disabled = true;
     if (btnScailIdle) btnScailIdle.disabled = true;
     if (btnScailAction) btnScailAction.disabled = true;
-    if (btnTime) btnTime.disabled = true;
     // BG remove stays available (upload and/or session files)
     if (secBgremove) secBgremove.classList.remove("locked");
     if (badgeBgremove) setBadge(badgeBgremove, "ready", "");
@@ -450,11 +496,15 @@
     if (idleScailReady || actionScailReady) {
       if (secPlay && badgePlay) unlock(secPlay, badgePlay, "ready");
     }
-    if (actionScailReady) {
-      if (secTime && badgeTime) {
-        unlock(secTime, badgeTime, "ready");
-        if (btnTime) btnTime.disabled = false;
-      }
+    // Time overshoot stays unlocked regardless of SCAIL state.
+    if (secTime) secTime.classList.remove("locked");
+    if (badgeTime && badgeTime.textContent === "locked") {
+      setBadge(badgeTime, "ready", "");
+    }
+    if (btnTime) {
+      const hasTimeFile =
+        timeVideoInput && timeVideoInput.files && timeVideoInput.files[0];
+      btnTime.disabled = !runId && !hasTimeFile;
     }
     if (idleScailReady && actionScailReady && badgeScail) {
       setBadge(badgeScail, "done", "done");
@@ -467,6 +517,19 @@
   if (secBgremove) secBgremove.classList.remove("locked");
   if (badgeBgremove) setBadge(badgeBgremove, "ready", "");
   if (btnBgremove) btnBgremove.disabled = false;
+  if (timeVideoInput) {
+    timeVideoInput.addEventListener("change", () => {
+      const f = timeVideoInput.files && timeVideoInput.files[0];
+      if (timeVideoName) {
+        timeVideoName.textContent = f
+          ? f.name + " (" + Math.round(f.size / 1024) + " KB)"
+          : "No file chosen — will use session action_nobg / action.mp4 if present.";
+      }
+      if (btnTime && !busy) {
+        btnTime.disabled = !runId && !f;
+      }
+    });
+  }
   if (bgVideoInput) {
     bgVideoInput.addEventListener("change", () => {
       const f = bgVideoInput.files && bgVideoInput.files[0];
@@ -479,12 +542,14 @@
   }
 
   function applyActionToPlayer(actionUrl, idleUrl) {
+    const hint = document.getElementById("preview-click-hint");
     if (idleUrl) {
       showVideo(boxIdleVideo, vidIdleVideo, idleUrl);
       idleVideo.src = bust(idleUrl);
       idleVideo.style.display = "block";
       preview.style.display = "block";
       idleVideo.play().catch(() => {});
+      if (secPlay && badgePlay) unlock(secPlay, badgePlay, "ready");
     }
     if (actionUrl) {
       const url = bust(actionUrl);
@@ -518,6 +583,8 @@
       hasAction = true;
       preview.classList.add("has-action");
       preview.style.display = "block";
+      if (secPlay && badgePlay) unlock(secPlay, badgePlay, "ready");
+      if (hint) hint.style.display = "block";
     }
   }
 
@@ -625,7 +692,6 @@
       btnScailAction.disabled = false;
       if (badgeScailAction) setBadge(badgeScailAction, "ready", "");
     }
-    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
     return data;
   }
 
@@ -652,9 +718,44 @@
       btnScailAction.disabled = false;
       if (badgeScailAction) setBadge(badgeScailAction, "ready", "");
     }
-    if (secTime && badgeTime) lock(secTime, badgeTime, "locked");
-    if (btnTime) btnTime.disabled = true;
     return data;
+  }
+
+  /** Load product SCAIL prompt defaults into the textareas (optional action_prompt embed). */
+  async function loadScailDefaults({ force = true } = {}) {
+    if (!scailIdlePositiveEl && !scailActionPositiveEl && !scailNegativeEl) return;
+    const actionPrompt =
+      (document.getElementById("action_prompt") &&
+        document.getElementById("action_prompt").value) ||
+      "";
+    const q = actionPrompt
+      ? `?action_prompt=${encodeURIComponent(actionPrompt)}`
+      : "";
+    const r = await fetch("/api/scail-defaults" + q);
+    if (!r.ok) throw `scail defaults HTTP ${r.status}`;
+    const d = await r.json();
+    if (scailIdlePositiveEl && (force || !scailIdlePositiveEl.value.trim())) {
+      scailIdlePositiveEl.value = d.idle_positive || "";
+    }
+    if (scailActionPositiveEl && (force || !scailActionPositiveEl.value.trim())) {
+      scailActionPositiveEl.value = d.action_positive || d.action_positive_base || "";
+    }
+    if (scailNegativeEl && (force || !scailNegativeEl.value.trim())) {
+      scailNegativeEl.value = d.negative || "";
+    }
+    return d;
+  }
+
+  function appendScailPrompts(fd) {
+    if (scailIdlePositiveEl) {
+      fd.append("scail_idle_positive", scailIdlePositiveEl.value || "");
+    }
+    if (scailActionPositiveEl) {
+      fd.append("scail_action_positive", scailActionPositiveEl.value || "");
+    }
+    if (scailNegativeEl) {
+      fd.append("scail_negative", scailNegativeEl.value || "");
+    }
   }
 
   /** @param {"idle"|"action"|"both"} which */
@@ -675,6 +776,7 @@
     const fd = new FormData();
     fd.append("run_id", runId);
     fd.append("which", which);
+    appendScailPrompts(fd);
     const data = await postForm("/session/scail", fd);
 
     if (which === "idle" || which === "both") {
@@ -697,17 +799,86 @@
     return data;
   }
 
-  /** Time spring remap on final action character video. */
+  /** Time spring remap: optional upload, else action_nobg, else action.mp4. */
   async function doTimeOvershoot() {
-    if (!runId) throw "No session.";
-    if (!actionScailReady) throw "Run SCAIL action first.";
+    const hasFile =
+      timeVideoInput && timeVideoInput.files && timeVideoInput.files[0];
+    if (!runId && !hasFile) {
+      throw "Create a session or import a video for time overshoot.";
+    }
     if (badgeTime) setBadge(badgeTime, "running", "running");
+    statusEl.textContent =
+      "Time overshoot running (alpha remaps can take 1–3 min; wait for done)…";
     const fd = new FormData();
-    fd.append("run_id", runId);
-    const data = await postForm("/session/time-overshoot", fd);
+    // Only send run_id when it looks like a real session id (avoid "null"/junk).
+    if (runId && typeof runId === "string" && runId.length >= 8) {
+      fd.append("run_id", runId);
+    }
+    if (hasFile) fd.append("video", timeVideoInput.files[0]);
+    let data;
+    try {
+      data = await postForm("/session/time-overshoot", fd);
+    } catch (e) {
+      // Stale session after server restart — retry once with upload only.
+      const msg = typeof e === "string" ? e : JSON.stringify(e);
+      if (hasFile && /invalid run_id/i.test(msg)) {
+        const fd2 = new FormData();
+        fd2.append("video", timeVideoInput.files[0]);
+        data = await postForm("/session/time-overshoot", fd2);
+        runId = data.run_id || null;
+      } else {
+        if (badgeTime) setBadge(badgeTime, "error", "");
+        throw e;
+      }
+    }
+    if (data.run_id) {
+      runId = data.run_id;
+    }
+    // Mark complete as soon as we have any timed/action output.
+    const ok =
+      data.action ||
+      data.action_timed ||
+      data.action_nobg ||
+      data.action_timed_webm ||
+      data.action_nobg_alpha;
+    if (!ok) {
+      if (badgeTime) setBadge(badgeTime, "error", "");
+      throw data.errors || data.warnings || "Time overshoot produced no output.";
+    }
     if (badgeTime) setBadge(badgeTime, "done", "done");
-    applyActionToPlayer(data.action, data.idle);
+    if (data.warnings && Object.keys(data.warnings).length) {
+      errorsEl.textContent =
+        "Completed with warnings:\n" + JSON.stringify(data.warnings, null, 2);
+    }
+    applyActionToPlayer(data.action || data.action_timed, data.idle);
+    const previewUrl = data.action_timed || data.action || data.action_nobg;
+    if (previewUrl && boxTimeVideo && vidTimeVideo) {
+      showVideo(boxTimeVideo, vidTimeVideo, previewUrl);
+    }
+    if (data.action_nobg && boxActionNobg && vidActionNobg) {
+      showVideo(boxActionNobg, vidActionNobg, data.action_nobg);
+    }
     unlock(secPlay, badgePlay, "ready");
+    // CapCut links if alpha exports exist
+    if (bgremoveLinks) {
+      const links = [];
+      [
+        ["action_nobg_alpha", "action_nobg_alpha.mov"],
+        ["action_timed_webm", "action_timed.webm"],
+        ["action_nobg_webm", "action_nobg.webm"],
+        ["action_timed", "action_timed.mp4"],
+      ].forEach(([key, name]) => {
+        if (data[key]) {
+          links.push('<a href="' + data[key] + '" download>' + name + "</a>");
+        }
+      });
+      if (links.length) {
+        bgremoveLinks.innerHTML =
+          (bgremoveLinks.innerHTML ? bgremoveLinks.innerHTML + " · " : "") +
+          "Timed: " +
+          links.join(" · ");
+      }
+    }
     return data;
   }
 
@@ -762,7 +933,10 @@
       data.upload_nobg ||
       data.idle_nobg_webm ||
       data.action_nobg_webm ||
-      data.upload_nobg_webm;
+      data.upload_nobg_webm ||
+      data.idle_nobg_alpha ||
+      data.action_nobg_alpha ||
+      data.upload_nobg_alpha;
     if (!res.ok && !hasOut) {
       throw data.error || data.errors || data;
     }
@@ -787,6 +961,10 @@
     );
     const links = [];
     [
+      // CapCut: ProRes 4444 with real alpha (libvpx-decoded)
+      ["upload_nobg_alpha", "upload_nobg_alpha.mov"],
+      ["idle_nobg_alpha", "idle_nobg_alpha.mov"],
+      ["action_nobg_alpha", "action_nobg_alpha.mov"],
       ["upload_nobg_webm", "upload_nobg.webm"],
       ["idle_nobg_webm", "idle_nobg.webm"],
       ["action_nobg_webm", "action_nobg.webm"],
@@ -949,6 +1127,22 @@
   }
 
   // -- 5 SCAIL2 character (idle / action separate) ------------------------
+  // Fill product defaults once (server is source of truth).
+  loadScailDefaults({ force: true }).catch((e) => {
+    console.warn("scail defaults", e);
+  });
+  if (btnScailDefaults) {
+    btnScailDefaults.addEventListener("click", async () => {
+      if (busy) return;
+      try {
+        await loadScailDefaults({ force: true });
+        statusEl.textContent =
+          "SCAIL prompt defaults reloaded (action positive uses current Action prompt).";
+      } catch (e) {
+        fail(e);
+      }
+    });
+  }
   if (btnScailIdle) {
     btnScailIdle.addEventListener("click", async () => {
       if (!runId || busy) return;
@@ -973,14 +1167,8 @@
       setBusy(true, "SCAIL2 action: drive character with action guide…");
       try {
         await doScail("action");
-        if (timeChecked()) {
-          statusEl.textContent = "SCAIL action done. Applying time overshoot…";
-          await doTimeOvershoot();
-          statusEl.textContent = "Time overshoot applied. Use preview player.";
-        } else {
-          statusEl.textContent =
-            "SCAIL action done. Optional: time overshoot, or use preview player.";
-        }
+        statusEl.textContent =
+          "SCAIL action done. Next: step 6 bg remove, then optional time overshoot.";
       } catch (e) {
         fail(e);
         if (badgeScailAction) setBadge(badgeScailAction, "error", "");
@@ -991,15 +1179,58 @@
     });
   }
 
-  // -- 6 time overshoot on final action video -----------------------------
+  // -- 6 background removal (before time overshoot) -----------------------
+  if (btnBgremove) {
+    btnBgremove.addEventListener("click", async () => {
+      // Allow upload-only without prior session: doBgremove can mint run_id.
+      if (busy) return;
+      if (!runId && !(bgVideoInput && bgVideoInput.files && bgVideoInput.files[0])) {
+        statusEl.textContent = "Create a session or import a video first.";
+        return;
+      }
+      clearErrors();
+      setBusy(true, "Background removal (videoBGremoval)… kill Comfy if VRAM is full.");
+      try {
+        await doBgremove();
+        statusEl.textContent =
+          "BG removal done. Download *_nobg_alpha.mov for CapCut (real alpha).";
+      } catch (e) {
+        fail(e);
+        if (badgeBgremove) setBadge(badgeBgremove, "error", "");
+        statusEl.textContent = "Background removal failed.";
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  // -- 7 time overshoot (session video and/or upload) ---------------------
   if (btnTime) {
     btnTime.addEventListener("click", async () => {
-      if (!runId || busy) return;
+      if (busy) return;
+      const hasFile =
+        timeVideoInput && timeVideoInput.files && timeVideoInput.files[0];
+      if (!runId && !hasFile) {
+        statusEl.textContent = "Create a session or import a video first.";
+        return;
+      }
       clearErrors();
-      setBusy(true, "Time overshoot on action video…");
+      setBusy(
+        true,
+        hasFile
+          ? "Time overshoot on uploaded video…"
+          : "Time overshoot (prefers action_nobg, else action.mp4)…"
+      );
       try {
-        await doTimeOvershoot();
-        statusEl.textContent = "Time overshoot applied. Preview player uses the timed clip.";
+        const data = await doTimeOvershoot();
+        const alphaHint = data && data.action_nobg_alpha
+          ? " CapCut: action_nobg_alpha.mov"
+          : data && data.has_alpha
+            ? " (alpha webm ready)"
+            : "";
+        statusEl.textContent =
+          "Time overshoot done." + alphaHint + " Preview uses gray-bg mp4 (matches idle).";
+        if (badgeTime) setBadge(badgeTime, "done", "done");
       } catch (e) {
         fail(e);
         if (badgeTime) setBadge(badgeTime, "error", "");
@@ -1010,24 +1241,42 @@
     });
   }
 
-  // -- 8 background removal -----------------------------------------------
-  if (btnBgremove) {
-    btnBgremove.addEventListener("click", async () => {
-      if (!runId || busy) return;
-      clearErrors();
-      setBusy(true, "Background removal (videoBGremoval)… kill Comfy if VRAM is full.");
-      try {
-        await doBgremove();
-        statusEl.textContent =
-          "BG removal done. Preview uses no-bg mp4; download .webm for alpha.";
-      } catch (e) {
-        fail(e);
-        if (badgeBgremove) setBadge(badgeBgremove, "error", "");
-        statusEl.textContent = "Background removal failed.";
-      } finally {
-        setBusy(false);
-      }
+  // -- Mode tabs (Run all / Step by step) --------------------------------
+  const tabBtnRunall = document.getElementById("tab-btn-runall");
+  const tabBtnSteps = document.getElementById("tab-btn-steps");
+  const tabPanelRunall = document.getElementById("tab-runall");
+  const tabPanelSteps = document.getElementById("tab-steps");
+  const actionPromptEl = document.getElementById("action_prompt");
+  const actionPromptStepsEl = document.getElementById("action_prompt_steps");
+
+  function setModeTab(name) {
+    const isRun = name === "runall";
+    if (tabBtnRunall) tabBtnRunall.setAttribute("aria-selected", isRun ? "true" : "false");
+    if (tabBtnSteps) tabBtnSteps.setAttribute("aria-selected", isRun ? "false" : "true");
+    if (tabPanelRunall) tabPanelRunall.classList.toggle("active", isRun);
+    if (tabPanelSteps) tabPanelSteps.classList.toggle("active", !isRun);
+  }
+
+  function syncActionPrompt(from, to) {
+    if (!from || !to) return;
+    if (to.value !== from.value) to.value = from.value;
+  }
+
+  if (tabBtnRunall) {
+    tabBtnRunall.addEventListener("click", () => {
+      syncActionPrompt(actionPromptStepsEl, actionPromptEl);
+      setModeTab("runall");
     });
+  }
+  if (tabBtnSteps) {
+    tabBtnSteps.addEventListener("click", () => {
+      syncActionPrompt(actionPromptEl, actionPromptStepsEl);
+      setModeTab("steps");
+    });
+  }
+  if (actionPromptEl && actionPromptStepsEl) {
+    actionPromptEl.addEventListener("input", () => syncActionPrompt(actionPromptEl, actionPromptStepsEl));
+    actionPromptStepsEl.addEventListener("input", () => syncActionPrompt(actionPromptStepsEl, actionPromptEl));
   }
 
   // -- Run all ------------------------------------------------------------
@@ -1039,9 +1288,11 @@
         statusEl.textContent = "Please choose an image.";
         return;
       }
-      if (!document.getElementById("action_prompt").value.trim()) {
+      syncActionPrompt(actionPromptStepsEl, actionPromptEl);
+      if (!actionPromptEl || !actionPromptEl.value.trim()) {
         statusEl.textContent = "Action prompt is required for Run all.";
-        document.getElementById("action_prompt").focus();
+        if (actionPromptEl) actionPromptEl.focus();
+        setModeTab("runall");
         return;
       }
       setBusy(true, "Run all: creating session...");
@@ -1062,14 +1313,28 @@
         await doScail("idle");
         statusEl.textContent = "Run all: SCAIL action…";
         await doScail("action");
+        // Step 6 before time overshoot: session idle + action when present.
+        if (chkBgIdle) chkBgIdle.checked = true;
+        if (chkBgAction) chkBgAction.checked = true;
+        statusEl.textContent = "Run all: background removal…";
+        await doBgremove();
         if (timeChecked()) {
-          statusEl.textContent = "Run all: time overshoot on action video…";
+          statusEl.textContent = "Run all: time overshoot (prefers nobg)…";
           await doTimeOvershoot();
+        }
+        // Ensure combined player is ready and scrolled into view on Run all.
+        refreshPlayerUnlock();
+        if (secPlay && badgePlay) unlock(secPlay, badgePlay, "ready");
+        if (preview) {
+          preview.style.display = "block";
+          try {
+            secPlay.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          } catch (_) {}
         }
         statusEl.textContent =
           "Run all done. Session " +
           (runId ? runId.slice(0, 8) + "…" : "") +
-          " — click preview to play action.";
+          " — click Preview below to play action.";
       } catch (e) {
         fail(e);
         statusEl.textContent = "Run all stopped with an error.";

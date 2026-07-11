@@ -44,6 +44,7 @@ CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".mp4": "video/mp4",
     ".webm": "video/webm",
+    ".mov": "video/quicktime",
     ".json": "application/json",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -110,7 +111,7 @@ def _content_type_for(path: Path) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MotionPortrait/1.0"
+    server_version = "AniForge/1.0"
 
     # -- helpers --------------------------------------------------------
     def _send_json(self, status: int, payload: dict):
@@ -192,6 +193,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": "not found"})
                 return
             self._send_file(target)
+            return
+        if path == "/api/scail-defaults":
+            self._handle_scail_defaults()
             return
         self._send_json(404, {"error": "not found"})
 
@@ -346,6 +350,34 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_scail_defaults(self):
+        """Product defaults for SCAIL2 positive/negative text fields."""
+        try:
+            from urllib.parse import parse_qs, urlparse
+
+            from pipeline.generate import (
+                SCAIL_ACTION_POSITIVE,
+                SCAIL_IDLE_POSITIVE,
+                SCAIL_NEGATIVE,
+                build_scail_positive,
+            )
+
+            qs = parse_qs(urlparse(self.path).query)
+            action_prompt = (qs.get("action_prompt") or [""])[0]
+            self._send_json(
+                200,
+                {
+                    "idle_positive": SCAIL_IDLE_POSITIVE,
+                    "action_positive": build_scail_positive(
+                        "action", action_prompt
+                    ),
+                    "action_positive_base": SCAIL_ACTION_POSITIVE,
+                    "negative": SCAIL_NEGATIVE,
+                },
+            )
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+
     def _handle_session_scail(self):
         try:
             form, err = self._read_multipart()
@@ -368,6 +400,9 @@ class Handler(BaseHTTPRequestHandler):
                 which=which,
                 runs_dir=RUNS_DIR,
                 client=client,
+                positive_idle=form.getvalue("scail_idle_positive") or None,
+                positive_action=form.getvalue("scail_action_positive") or None,
+                negative=form.getvalue("scail_negative") or None,
             )
             status = 200 if not result.get("errors") else 500
             self._send_json(status, result)
@@ -392,18 +427,54 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": str(exc)})
 
     def _handle_session_time_overshoot(self):
-        """Time-remap final action character video (after SCAIL). No Comfy."""
+        """Time-remap action video: session action/nobg and/or uploaded video."""
         try:
             form, err = self._read_multipart()
             if err:
                 self._send_json(400, {"error": err})
                 return
-            run_id = (form.getvalue("run_id") or "").strip()
-            if not run_id or not (RUNS_DIR / run_id).is_dir():
-                self._send_json(400, {"error": "invalid run_id"})
+            run_id = (form.getvalue("run_id") or "").strip() or None
+            upload_bytes = None
+            upload_filename = "upload.mp4"
+            if "video" in form:
+                item = form["video"]
+                if getattr(item, "filename", None):
+                    upload_filename = item.filename or upload_filename
+                    upload_bytes = item.file.read()
+            if not run_id and upload_bytes is None:
+                self._send_json(
+                    400,
+                    {"error": "upload a video or create a session first"},
+                )
                 return
-            result = stage_time_overshoot(run_id, runs_dir=RUNS_DIR)
-            status = 200 if not result.get("errors") else 500
+            result = stage_time_overshoot(
+                run_id,
+                runs_dir=RUNS_DIR,
+                upload_bytes=upload_bytes,
+                upload_filename=upload_filename,
+            )
+            # Success if any timed/action artifact exists; soft warnings stay in payload.
+            has_out = any(
+                result.get(k)
+                for k in (
+                    "action",
+                    "action_timed",
+                    "action_nobg",
+                    "action_timed_webm",
+                    "action_nobg_webm",
+                    "action_nobg_alpha",
+                )
+            )
+            hard = result.get("errors") or {}
+            # Soft keys that must not fail the HTTP status alone
+            soft_keys = {"time_alpha"}
+            hard_only = {k: v for k, v in hard.items() if k not in soft_keys}
+            if has_out and hard:
+                # Move soft / residual messages to warnings for the client.
+                result["warnings"] = dict(hard)
+                if not hard_only:
+                    result["errors"] = {}
+            status = 200 if has_out or not hard_only else 500
             self._send_json(status, result)
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})
@@ -417,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             run_id = (form.getvalue("run_id") or "").strip() or None
             which = (form.getvalue("which") or "both").strip().lower()
-            model = (form.getvalue("model") or "RVM MobileNetV3").strip()
+            model = (form.getvalue("model") or "RMBG-2.0 HQ").strip()
             upload_bytes = None
             upload_filename = "upload.mp4"
             if "video" in form:
@@ -442,6 +513,9 @@ class Handler(BaseHTTPRequestHandler):
                     "idle_nobg_webm",
                     "action_nobg_webm",
                     "upload_nobg_webm",
+                    "idle_nobg_alpha",
+                    "action_nobg_alpha",
+                    "upload_nobg_alpha",
                 )
             )
             errs = result.get("errors") or {}
@@ -558,7 +632,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Motion Portrait backend server")
+    parser = argparse.ArgumentParser(description="AniForge backend server")
     parser.add_argument("--port", type=int, default=8500)
     args = parser.parse_args(argv)
 

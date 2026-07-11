@@ -134,22 +134,27 @@ class ComfyClient:
 
         # Flag unload; worker applies on next idle poll (~1s)
         report["steps"].append({"free1": self.free(unload_models=True, free_memory=True)})
-        time.sleep(2.0)
+        time.sleep(0.5 if wait_s <= 3 else 1.5)
         report["steps"].append({"free2": self.free(unload_models=True, free_memory=True)})
 
-        target = int(min_free_gb * (1024 ** 3))
+        target = int(max(0.0, min_free_gb) * (1024 ** 3))
         t0 = time.time()
-        last = before
-        while time.time() - t0 < wait_s:
-            time.sleep(1.5)
-            # Re-flag so idle worker keeps unloading
-            self.free(unload_models=True, free_memory=True)
-            last = self.vram_free_bytes()
-            if last is not None and last >= target:
-                break
+        last = self.vram_free_bytes()
+        # min_free_gb<=0 or wait_s<=0: fire-and-forget (return ASAP for UI latency)
+        if min_free_gb > 0 and wait_s > 0:
+            while time.time() - t0 < wait_s:
+                if last is not None and last >= target:
+                    break
+                time.sleep(1.0)
+                # Re-flag so idle worker keeps unloading
+                self.free(unload_models=True, free_memory=True)
+                last = self.vram_free_bytes()
 
         report["vram_free_after"] = last
-        report["ok"] = last is not None and last >= target
+        report["ok"] = (
+            min_free_gb <= 0
+            or (last is not None and last >= target)
+        )
         report["waited_s"] = round(time.time() - t0, 1)
         if last is not None:
             report["vram_free_after_gb"] = round(last / (1024 ** 3), 2)
@@ -160,7 +165,7 @@ class ComfyClient:
     def submit(self, graph, client_id):
         return self._post("/prompt", {"prompt": graph, "client_id": client_id})["prompt_id"]
 
-    def wait(self, prompt_id, timeout=7200, interval=3):
+    def wait(self, prompt_id, timeout=7200, interval=1.0):
         """Poll history until done. Default timeout 2h (SCAIL under VRAM pressure)."""
         t0 = time.time()
         while True:

@@ -25,14 +25,14 @@ from pipeline.generate import (
     align_motion_to_base_pose,
     dampen_idle_joints,
     prepare_idle_source_motion,
+    shape_live2d_idle,
     FPS,
     JOINT_SPRING,
-    SCAIL_ACTION_POSITIVE,
-    SCAIL_IDLE_POSITIVE,
     TIME_SPRING,
     _output_size,
     _pad_to_aspect,
     align_4k1,
+    build_scail_positive,
     ensure_mouth_still,
     plan_steps,
     sanitize_action,
@@ -252,9 +252,9 @@ def generate_anchored(
     result["scale"] = scale
 
     # Phase 3 — skeleton guide + SCAIL
-    for label, npz_path, positive in (
-        ("idle", idle_npz, SCAIL_IDLE_POSITIVE),
-        ("action", action_npz, SCAIL_ACTION_POSITIVE),
+    for label, npz_path in (
+        ("idle", idle_npz),
+        ("action", action_npz),
     ):
         if not npz_path.is_file():
             result["errors"][f"{label}_npz"] = f"missing {npz_path.name}"
@@ -264,8 +264,7 @@ def generate_anchored(
             extract_pose = run_dir / "extract_pose.npy"
             base = np.load(extract_pose) if extract_pose.is_file() else None
             if label == "idle":
-                P = prepare_idle_source_motion(P)
-                P = dampen_idle_joints(P, keep=IDLE_MOTION_KEEP, base_pose=base)
+                P = shape_live2d_idle(P, base_pose=base, keep=IDLE_MOTION_KEEP)
                 np.savez(npz_path, posed_joints=P)
             elif label == "action":
                 # Extract pose strength = 100%: full stick at frame 0.
@@ -286,6 +285,10 @@ def generate_anchored(
             render_smplx_guide(P, skel, camera=cam)
             _pad_to_aspect(skel, guide, out_w, out_h)
             out_mp4 = run_dir / f"{label}.mp4"
+            positive = build_scail_positive(
+                label,
+                action_text if label == "action" else None,
+            )
             drive_character(
                 client, guide, image, out_mp4,
                 length=align_4k1(P.shape[0]),

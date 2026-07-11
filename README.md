@@ -1,6 +1,6 @@
-# Motion Portrait
+# AniForge
 
-Motion Portrait turns a single character image and an action prompt into a live2d-style animated portrait: a looping idle animation plus a one-shot action triggered by clicking the preview.
+AniForge turns a single character image and an action prompt into a live2d-style animated portrait: a looping idle animation plus a one-shot action triggered by clicking the preview.
 
 A single generate run produces two mp4 files:
 - `idle.mp4` — a looping idle animation

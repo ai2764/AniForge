@@ -10,9 +10,15 @@ from pipeline.generate import (
     ensure_mouth_still,
     dampen_idle_joints,
     prepare_idle_source_motion,
+    shape_live2d_idle,
     align_motion_to_base_pose,
     DEFAULT_IDLE_PROMPT,
     MOUTH_STILL_CLAUSE,
+    IDLE_DURATION_SEC,
+    SCAIL_IDLE_POSITIVE,
+    SCAIL_ACTION_POSITIVE,
+    SCAIL_NEGATIVE,
+    build_scail_positive,
     _output_size,
 )
 
@@ -45,11 +51,58 @@ def test_ensure_mouth_still_idempotent():
     assert "no talking" in MOUTH_STILL_CLAUSE.lower()
 
 
+def test_scail_prompts_finished_video_style():
+    """SCAIL-2 official: describe finished video; long detail; mouth in positive."""
+    idle = SCAIL_IDLE_POSITIVE.lower()
+    action = SCAIL_ACTION_POSITIVE.lower()
+    assert len(SCAIL_IDLE_POSITIVE) > 200
+    assert len(SCAIL_ACTION_POSITIVE) > 200
+    assert "reference" in idle and "mouth closed" in idle
+    assert "reference" in action and "mouth closed" in action
+    assert "replace" not in idle and "swap" not in action
+    # Action builder embeds concrete motion into a finished-video paragraph.
+    built = build_scail_positive(
+        "action",
+        "Raise the right hand in a salute. Mouth closed and still, lips sealed.",
+    )
+    assert "salute" in built.lower()
+    assert "mouth closed" in built.lower()
+    assert "moves as follows" in built.lower()
+    assert built.count("Mouth closed and still") == 0  # boilerplate stripped once
+    assert build_scail_positive("idle") == SCAIL_IDLE_POSITIVE
+    neg = SCAIL_NEGATIVE.lower()
+    assert "open mouth" in neg
+    assert "lip sync" in neg or "lipsync" in neg
+
+
 def test_default_idle_keeps_pose_and_avoids_large_motion():
     p = DEFAULT_IDLE_PROMPT.lower()
-    assert "current pose" in p or "relaxed idle" in p
+    assert "idle" in p and ("breathing" in p or "chest" in p)
+    assert "arms" in p and ("still" in p or "fixed" in p)
     assert "do not stand up" in p
     assert "stands nearly" not in p
+    assert IDLE_DURATION_SEC == 2.0
+
+
+def test_shape_live2d_idle_locks_arms_and_loops():
+    P = np.zeros((60, 22, 3), dtype=np.float64)
+    # Kimodo tries to wave left wrist
+    P[:, 20, 1] = np.linspace(0, 0.5, 60)
+    P[:, 15, 0] = 0.05 * np.sin(np.linspace(0, 4 * np.pi, 60))
+    base = np.zeros((22, 3), dtype=np.float64)
+    base[0, 1] = 0.9
+    base[15, 1] = 1.6
+    base[20, 1] = 1.0
+    out = shape_live2d_idle(P, base_pose=base, keep=0.08, fps=30.0, period_s=0.95)
+    assert out.shape == P.shape
+    assert np.allclose(out[0], base)
+    # wrists locked to base entire clip
+    assert np.allclose(out[:, 20, :], base[20])
+    assert np.allclose(out[:, 4, :], base[4])  # knee locked
+    # head has some motion (breath / residual)
+    assert float(out[:, 15, 1].std()) > 1e-5
+    # seamless-ish: last frame near first
+    assert float(np.linalg.norm(out[-1] - out[0])) < 0.05
 
 
 def test_dampen_idle_joints_shrinks_motion():

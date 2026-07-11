@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Motion Portrait</title>
+<title>AniForge</title>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -11,15 +11,37 @@
     margin: 2rem auto;
     padding: 0 1rem;
   }
-  h1 { font-size: 1.4rem; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.15rem; }
+  .tagline {
+    font-size: 1rem;
+    font-weight: 500;
+    opacity: 0.8;
+    margin: 0 0 1.25rem;
+    letter-spacing: 0.01em;
+  }
   h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
   form, .section { display: flex; flex-direction: column; gap: 0.75rem; }
   label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="number"], textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 0.4rem;
+    font: inherit;
   }
+  textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+    line-height: 1.35;
+  }
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid #888;
+    border-radius: 6px;
+    padding: 0.35rem 0.7rem;
+    cursor: pointer;
+    font: inherit;
+  }
+  .btn-secondary:hover { border-color: #2a7de1; color: #2a7de1; }
   #drop-zone {
     border: 2px dashed #888;
     border-radius: 6px;
@@ -194,7 +216,7 @@
   #errors { color: #c0392b; white-space: pre-wrap; }
   #preview {
     position: relative;
-    margin-top: 1.5rem;
+    margin-top: 0.5rem;
     max-width: 100%;
     background: #000;
     border-radius: 6px;
@@ -207,11 +229,62 @@
   }
   #actionVideo { display: none; }
   #preview.has-action { cursor: pointer; }
+  #sec-play:not(.locked) #preview {
+    outline: 2px solid transparent;
+  }
+  #sec-play:not(.locked) {
+    margin-top: 1rem;
+  }
+  #sec-play .preview-click-hint {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0.35rem 0 0;
+  }
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid #888;
+    border-radius: 8px;
+    overflow: hidden;
+    width: fit-content;
+    margin: 0.5rem 0 1rem;
+  }
+  .mode-tabs button {
+    font: inherit;
+    font-weight: 600;
+    padding: 0.55rem 1.1rem;
+    border: none;
+    border-right: 1px solid #888;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+  }
+  .mode-tabs button:last-child { border-right: none; }
+  .mode-tabs button[aria-selected="true"] {
+    background: #2a7de1;
+    color: #fff;
+  }
+  .mode-tabs button:hover:not([aria-selected="true"]) {
+    background: rgba(42, 125, 225, 0.1);
+  }
+  .tab-panel { display: none; flex-direction: column; gap: 0.75rem; }
+  .tab-panel.active { display: flex; }
+  .run-all-card {
+    border: 1px solid #888;
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .run-all-card h2 { margin: 0; font-size: 1.1rem; }
 </style>
 </head>
 <body>
-  <h1>Motion Portrait</h1>
+  <h1>AniForge</h1>
+  <p class="tagline">Bring Any Character to Life</p>
 
+  <!-- Shared setup: image / pose / scale / seed -->
   <form id="setup-form">
     <div>
       <label for="image-input">Character image</label>
@@ -241,13 +314,43 @@
 
     <label for="seed">Seed (optional, blank = random)</label>
     <input type="number" id="seed" name="seed" min="0" placeholder="random">
-
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-      <button type="button" id="btn-create-session">1. Create session</button>
-      <button type="button" id="btn-run-all" class="btn-run-all">Run all steps</button>
-    </div>
-    <p class="pose-hint">Run all: session → extract → idle/action skel (independent) → SCAIL idle + SCAIL action → optional time. Needs image + action prompt.</p>
   </form>
+
+  <div class="mode-tabs" role="tablist" aria-label="Workflow mode">
+    <button type="button" role="tab" id="tab-btn-runall" aria-selected="true" aria-controls="tab-runall" data-tab="runall">Run all</button>
+    <button type="button" role="tab" id="tab-btn-steps" aria-selected="false" aria-controls="tab-steps" data-tab="steps">Step by step</button>
+  </div>
+
+  <!-- ========== RUN ALL ========== -->
+  <div class="tab-panel active" id="tab-runall" role="tabpanel" aria-labelledby="tab-btn-runall">
+    <div class="run-all-card">
+      <h2>One-click pipeline</h2>
+      <p class="pose-hint" style="margin:0">
+        Session → extract → idle/action skeleton → optional joint → SCAIL → bg remove → optional time.
+        Uses shared image / pose / scale / seed above.
+      </p>
+      <div>
+        <label for="action_prompt">Action prompt</label>
+        <textarea id="action_prompt" name="action_prompt" rows="4"
+          placeholder="e.g. Slowly bring both hands to the hips and hold a relaxed hands-on-hips pose. Soft motion, feet fixed. Mouth closed, silent."
+          required></textarea>
+        <p class="pose-hint">Required. Describes the action skeleton motion (Kimodo). Mouth-still lines are fine.</p>
+      </div>
+      <div class="checkboxes">
+        <label><input type="checkbox" id="overshoot-joint" checked> Joint overshoot</label>
+        <label><input type="checkbox" id="overshoot-time" checked> Time overshoot</label>
+      </div>
+      <button type="button" id="btn-run-all" class="btn-run-all">Run all steps</button>
+      <p class="pose-hint" style="margin:0">When finished, use the shared <strong>Preview</strong> below — click video to play action.</p>
+    </div>
+  </div>
+
+  <!-- ========== STEP BY STEP ========== -->
+  <div class="tab-panel" id="tab-steps" role="tabpanel" aria-labelledby="tab-btn-steps">
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+      <button type="button" id="btn-create-session">1. Create session</button>
+      <p class="pose-hint" style="margin:0">Then run extract → idle / action → SCAIL → bg → time as needed.</p>
+    </div>
 
   <!-- Step: extract skeleton -->
   <section class="section locked" id="sec-extract" data-step="extract">
@@ -274,26 +377,26 @@
     <div>
       <label for="idle_prompt">Idle prompt</label>
       <input type="text" id="idle_prompt" name="idle_prompt"
-        value="A person holds their current pose in a relaxed idle with natural gentle motion: soft continuous breathing, a slight weight shift, and subtle sway of the torso, head, and arms. Keep the same overall posture; do not stand up or sit down; no walking, no waving, no dancing, no large gestures. Mouth closed and still the entire time, lips sealed, silent, no talking, no speaking, no lip movement, no chewing.">
-      <p class="pose-hint">Extract pose strength is always 100% (fully stuck). Amount only scales motion on top.</p>
+        value="A person holds their current pose in a calm seamless idle loop. Only tiny continuous breathing of the chest and a very slight head nod and sway; shoulders barely move. Arms, hands, and legs stay still and fixed in place. No waving, no gesturing, no walking, no dancing, no large joint rotations. Do not stand up or sit down; keep the same overall posture. Mouth closed and still the entire time, lips sealed, silent, no talking, no speaking, no lip movement, no chewing.">
+      <p class="pose-hint">Live2D-style: ~2s loop, head+chest micro, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
     </div>
     <div>
       <div class="label-with-info">
-        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">6%</span></label>
+        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">8%</span></label>
         <span class="info-tip" tabindex="0" role="img" aria-label="About idle motion amount">
           i
           <span class="info-bubble">
-            How much idle motion to keep after locking fully to the extract pose.
-            Formula: extract_pose + amount × (Kimodo frame deltas).
-            0% = frozen on extract; 6% = subtle (default); 30–60% = clearer sway;
-            100% = full source idle deltas on extract (visible motion).
-            Extract pose is always fully stuck — this slider does not loosen the pose.
+            Live2D-style idle post-process: extract pose fully stuck; arms/hands/legs locked.
+            Amount scales residual only on head/chest/shoulders from Kimodo, plus a fixed
+            sine breath (~0.95s period, ~0.2% body height). 0% = breath only;
+            8% = default subtle; higher = more Kimodo sway on free joints.
+            Duration is fixed ~2s seamless loop. Re-run Idle after changing.
           </span>
         </span>
       </div>
       <input type="range" id="idle_motion_keep" name="idle_motion_keep"
-        min="0" max="1" step="0.01" value="0.06">
-      <p class="pose-hint">Higher = more sway. Re-run Idle after changing (not live).</p>
+        min="0" max="1" step="0.01" value="0.08">
+      <p class="pose-hint">Default 8%. Re-run Idle after changing (not live).</p>
     </div>
     <button type="button" id="btn-idle" disabled>Start idle motion</button>
     <div class="preview-box" id="box-idle-skel">
@@ -309,10 +412,12 @@
       <h2>4. Action skeleton motion</h2>
       <span class="badge" id="badge-action">locked</span>
     </div>
-    <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size.</p>
+    <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size. Action prompt is on the <strong>Run all</strong> tab (synced).</p>
     <div>
-      <label for="action_prompt">Action prompt</label>
-      <input type="text" id="action_prompt" name="action_prompt" placeholder="e.g. wave hello with one hand" required>
+      <label for="action_prompt_steps">Action prompt</label>
+      <textarea id="action_prompt_steps" name="action_prompt_steps" rows="3"
+        placeholder="Same as Run all tab — e.g. wave hello with one hand"></textarea>
+      <p class="pose-hint">Synced with Run all → Action prompt.</p>
     </div>
     <div>
       <div class="label-with-info">
@@ -347,9 +452,7 @@
         min="0" max="1" step="0.01" value="1">
       <p class="pose-hint">Re-run Action (+ SCAIL action) after changing duration/amount.</p>
     </div>
-    <div class="checkboxes">
-      <label><input type="checkbox" id="overshoot-joint"> Joint overshoot (on skeleton motion)</label>
-    </div>
+    <p class="pose-hint">Joint overshoot: use checkbox on Run all tab (same control).</p>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
       <button type="button" id="btn-action" disabled>Start action motion</button>
       <button type="button" id="btn-joint" disabled>Apply joint overshoot</button>
@@ -370,7 +473,28 @@
     <p class="pose-hint">
       Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
       (Idle SCAIL after idle skel; Action SCAIL after action skel.)
+      Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
+      Next: step 6 bg remove, then optional time overshoot.
     </p>
+    <div>
+      <label for="scail_idle_positive">SCAIL idle positive</label>
+      <textarea id="scail_idle_positive" name="scail_idle_positive" rows="5"
+        placeholder="Loading defaults…"></textarea>
+    </div>
+    <div>
+      <label for="scail_action_positive">SCAIL action positive</label>
+      <textarea id="scail_action_positive" name="scail_action_positive" rows="5"
+        placeholder="Loading defaults…"></textarea>
+      <p class="pose-hint">Default action positive embeds step-4 Action prompt. “Reload defaults” refreshes from server (uses current Action prompt).</p>
+    </div>
+    <div>
+      <label for="scail_negative">SCAIL negative</label>
+      <textarea id="scail_negative" name="scail_negative" rows="3"
+        placeholder="Loading defaults…"></textarea>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0.4rem 0 0.6rem">
+      <button type="button" id="btn-scail-defaults" class="btn-secondary">Reload SCAIL defaults</button>
+    </div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
       <button type="button" id="btn-scail-idle" disabled>SCAIL idle</button>
       <span class="badge" id="badge-scail-idle">locked</span>
@@ -387,47 +511,16 @@
     </div>
   </section>
 
-  <!-- Step: time overshoot on final action video -->
-  <section class="section locked" id="sec-time" data-step="time">
-    <div class="section-head">
-      <h2>6. Time overshoot (action video)</h2>
-      <span class="badge" id="badge-time">locked</span>
-    </div>
-    <p class="pose-hint">
-      Optional. Spring playback remap on the final action character video only (no joint edit, no re-SCAIL).
-    </p>
-    <div class="checkboxes">
-      <label><input type="checkbox" id="overshoot-time"> Time overshoot (on final video)</label>
-    </div>
-    <button type="button" id="btn-time" disabled>Apply time overshoot</button>
-    <div class="preview-box" id="box-time-video">
-      <div class="preview-label">Timed action video</div>
-      <video id="vid-time-video" muted playsinline controls></video>
-    </div>
-  </section>
-
-  <!-- Combined click player -->
-  <section class="section locked" id="sec-play" data-step="play">
-    <div class="section-head">
-      <h2>7. Preview player</h2>
-      <span class="badge" id="badge-play">locked</span>
-    </div>
-    <p class="pose-hint">Loops idle; click to play action once, then back to idle.</p>
-    <div id="preview">
-      <video id="idleVideo" loop muted playsinline autoplay></video>
-      <video id="actionVideo" muted playsinline></video>
-    </div>
-  </section>
-
-  <!-- Background removal — always available, optional video upload -->
+  <!-- Step: background removal — before time overshoot so timed clip can use nobg -->
   <section class="section" id="sec-bgremove" data-step="bgremove">
     <div class="section-head">
-      <h2>8. Background removal</h2>
+      <h2>6. Background removal</h2>
       <span class="badge" id="badge-bgremove">ready</span>
     </div>
     <p class="pose-hint">
-      No pipeline prerequisites. Import any video, and/or process this session’s idle/action SCAIL mp4s if present.
-      Uses local <code>videoBGremoval</code>. Kill Comfy if VRAM is full.
+      After SCAIL (or import any video). Preferred before Time overshoot so step 7 remaps the no-bg action clip.
+      Uses local <code>videoBGremoval</code>. Also writes CapCut-ready
+      <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.
     </p>
     <div>
       <label for="bgremove-video">Import video (optional)</label>
@@ -437,14 +530,14 @@
     <div>
       <label for="bgremove_model">Matting model</label>
       <select id="bgremove_model" name="bgremove_model" style="width:100%;padding:0.4rem;box-sizing:border-box">
-        <option value="RVM MobileNetV3" selected>RVM MobileNetV3 (fast)</option>
+        <option value="RVM MobileNetV3">RVM MobileNetV3 (fast)</option>
         <option value="RVM ResNet50">RVM ResNet50</option>
-        <option value="RMBG-2.0 HQ">RMBG-2.0 HQ (sharper edges)</option>
+        <option value="RMBG-2.0 HQ" selected>RMBG-2.0 HQ (sharper edges)</option>
       </select>
     </div>
     <div class="checkboxes">
-      <label><input type="checkbox" id="bgremove_idle"> Also session idle.mp4</label>
-      <label><input type="checkbox" id="bgremove_action"> Also session action.mp4</label>
+      <label><input type="checkbox" id="bgremove_idle" checked> Session idle.mp4</label>
+      <label><input type="checkbox" id="bgremove_action" checked> Session action.mp4</label>
     </div>
     <button type="button" id="btn-bgremove">Remove background</button>
     <div class="preview-box" id="box-upload-nobg">
@@ -462,6 +555,55 @@
     <p class="pose-hint" id="bgremove-links"></p>
   </section>
 
+  <!-- Step: time overshoot — always unlocked; session video and/or upload -->
+  <section class="section" id="sec-time" data-step="time">
+    <div class="section-head">
+      <h2>7. Time overshoot (action video)</h2>
+      <span class="badge" id="badge-time">ready</span>
+    </div>
+    <p class="pose-hint">
+      Always available. Spring playback remap (no joint edit, no re-SCAIL).
+      Priority: upload → <code>action_nobg.webm</code> (real alpha) → alpha.mov → nobg.mp4 → action.mp4.
+      Alpha sources stay transparent after remap; re-exports <code>action_nobg_alpha.mov</code> for CapCut.
+      Browser preview mp4 flattens transparency onto neutral gray (same as bgremove preview).
+    </p>
+    <div>
+      <label for="time-video">Import video (optional)</label>
+      <input type="file" id="time-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv,.m4v">
+      <p class="pose-hint" id="time-video-name">No file chosen — will use session action_nobg / action.mp4 if present.</p>
+    </div>
+    <p class="pose-hint">Time overshoot toggle lives on the Run all tab (same control). This button always runs remap.</p>
+    <button type="button" id="btn-time">Apply time overshoot</button>
+    <div class="preview-box" id="box-time-video">
+      <div class="preview-label">Timed action video</div>
+      <video id="vid-time-video" muted playsinline controls></video>
+    </div>
+  </section>
+
+  <p class="pose-hint">Combined click preview is below (shared with Run all).</p>
+
+  </div><!-- /tab-steps -->
+
+  <!-- Shared: combined click player (Run all + Step by step) -->
+  <section class="section locked" id="sec-play" data-step="play">
+    <div class="section-head">
+      <h2>Preview</h2>
+      <span class="badge" id="badge-play">locked</span>
+    </div>
+    <p class="pose-hint">
+      Idle loops by default. <strong>Click the video</strong> to play action once, then back to idle.
+      Shown after SCAIL / Run all finishes.
+    </p>
+    <p class="preview-click-hint" id="preview-click-hint" style="display:none">
+      Click video → play action · ends → back to idle loop
+    </p>
+    <div id="preview">
+      <video id="idleVideo" loop muted playsinline autoplay></video>
+      <video id="actionVideo" muted playsinline></video>
+    </div>
+  </section>
+
+  <!-- Shared status under both modes -->
   <div id="status"></div>
   <div id="errors"></div>
 

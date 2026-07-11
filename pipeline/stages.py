@@ -20,8 +20,8 @@ from pipeline.generate import (
     IDLE_DURATION_SEC,
     IDLE_MOTION_KEEP,
     JOINT_SPRING,
-    SCAIL_ACTION_POSITIVE,
-    SCAIL_IDLE_POSITIVE,
+    SCAIL_NEGATIVE,
+    build_scail_positive,
     TIME_SPRING,
     _output_size,
     _pad_to_aspect,
@@ -32,6 +32,7 @@ from pipeline.generate import (
     prepare_idle_source_motion,
     plan_steps,
     sanitize_action,
+    shape_live2d_idle,
 )
 from pipeline.scail import drive_character
 from pipeline.seated.generate_anchored import (
@@ -334,14 +335,17 @@ def stage_idle(
         # Close NpzFile before overwrite (Windows locks open mmap files).
         with np.load(npz) as raw:
             save_kw = {k: raw[k].copy() for k in raw.files}
-        P_raw = save_kw["posed_joints"]
-        std_raw = float(np.asarray(P_raw).std(axis=0).mean())
-        # Boost near-static Kimodo clips so the keep slider has headroom (100% works).
-        P_src = prepare_idle_source_motion(P_raw)
-        std_source = float(np.asarray(P_src).std(axis=0).mean())
-        # Extract pose strength = 100%: fully stuck base; keep only scales deltas.
+        P_raw = np.asarray(save_kw["posed_joints"], dtype=np.float64)
+        std_raw = float(P_raw.std(axis=0).mean())
         base, cam = _load_extract_pose_and_camera(run_dir)
-        P = dampen_idle_joints(P_src, keep=keep, base_pose=base)
+        # Live2D-product idle: head/chest micro, arms/legs locked, ~2s seamless loop.
+        P = shape_live2d_idle(
+            P_raw,
+            base_pose=base,
+            keep=keep,
+            fps=float(FPS),
+        )
+        std_source = float(P.std(axis=0).mean())
         save_kw["posed_joints"] = P
         np.savez(npz, **save_kw)
         skel = run_dir / "idle_skel.mp4"
@@ -354,9 +358,10 @@ def stage_idle(
         out["skeleton_png"] = _rel_url(png) if png.is_file() else None
         out["n_frames"] = int(P.shape[0])
         out["motion_std_before"] = std_raw
-        out["motion_std_source"] = std_source
-        out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+        out["motion_std"] = std_source
         out["idle_motion_keep"] = keep
+        out["idle_duration"] = IDLE_DURATION_SEC
+        out["idle_style"] = "live2d"
         out["idle_anchored_to_extract"] = base is not None
         out["extract_pose_strength"] = 1.0  # always fully stuck
         out["kimodo_constraint"] = bool(job.get("constraint_json"))
@@ -540,6 +545,9 @@ def stage_scail(
     which: str = "both",
     runs_dir: Path = RUNS_DIR,
     client: ComfyClient | None = None,
+    positive_idle: str | None = None,
+    positive_action: str | None = None,
+    negative: str | None = None,
 ) -> dict:
     """SCAIL2: drive character image with skeleton guide(s).
 
@@ -547,6 +555,9 @@ def stage_scail(
       - \"idle\"   — only idle.mp4 (needs idle skeleton motion done)
       - \"action\" — only action.mp4 (needs action skeleton motion done)
       - \"both\"   — idle then action (legacy / Run all)
+
+    Optional positive_idle / positive_action / negative override the product
+    defaults (empty or None → build_scail_positive / SCAIL_NEGATIVE).
     """
     which = (which or "both").strip().lower()
     if which not in ("idle", "action", "both"):
@@ -555,6 +566,10 @@ def stage_scail(
     run_dir = Path(runs_dir) / run_id
     meta = _load_meta(run_dir)
 
+    neg = (negative if negative is not None else "").strip() or SCAIL_NEGATIVE
+    pos_idle_override = (positive_idle or "").strip()
+    pos_action_override = (positive_action or "").strip()
+
     labels: list[tuple[str, str]] = []
     if which in ("idle", "both"):
         if not meta.get("idle_done"):
@@ -562,14 +577,25 @@ def stage_scail(
                 "run_id": run_id,
                 "errors": {"idle": "run idle skeleton motion first"},
             }
-        labels.append(("idle", SCAIL_IDLE_POSITIVE))
+        labels.append(
+            (
+                "idle",
+                pos_idle_override or build_scail_positive("idle"),
+            )
+        )
     if which in ("action", "both"):
         if not meta.get("action_done"):
             return {
                 "run_id": run_id,
                 "errors": {"action": "run action skeleton motion first"},
             }
-        labels.append(("action", SCAIL_ACTION_POSITIVE))
+        labels.append(
+            (
+                "action",
+                pos_action_override
+                or build_scail_positive("action", meta.get("action_prompt")),
+            )
+        )
 
     image = _find_image(run_dir)
     seed = meta["seed"]
@@ -587,7 +613,7 @@ def stage_scail(
     if client is None:
         client = ComfyClient()
 
-    fre0 = client.free_vram(interrupt=False, clear_queue=True, wait_s=40, min_free_gb=8.0)
+    fre0 = client.free_vram(interrupt=False, clear_queue=True, wait_s=12, min_free_gb=4.0)
     out["comfy_free_start"] = fre0
     print(f"[stage_scail] which={which} free_vram start: {fre0}", flush=True)
 
@@ -615,14 +641,21 @@ def stage_scail(
                 length=align_4k1(n_frames), width=out_w, height=out_h,
                 prefix=f"mp_{pose_mode}_{label}", seed=seed,
                 positive=positive,
+                negative=neg,
             )
+            # Mouth: rely on SCAIL positive/negative prompts (pixel paste face_lock
+            # disabled — quality was unacceptable on production standees).
+            meta[f"{label}_mouth_locked"] = False
+            meta[f"{label}_scail_positive"] = positive
+            meta[f"{label}_scail_negative"] = neg
             out[label] = _rel_url(out_mp4)
             meta[f"{label}_scail_done"] = True
         except Exception as exc:
             out["errors"][label] = str(exc)
-            client.free_vram(interrupt=True, clear_queue=True, wait_s=30, min_free_gb=6.0)
+            client.free_vram(interrupt=True, clear_queue=True, wait_s=5, min_free_gb=0)
 
-    fre1 = client.free_vram(interrupt=False, clear_queue=False, wait_s=30, min_free_gb=8.0)
+    # Non-blocking reclaim — do not hold the HTTP response for 30s+ after Comfy is done.
+    fre1 = client.free_vram(interrupt=False, clear_queue=False, wait_s=3, min_free_gb=0)
     out["comfy_free_end"] = fre1
     print(f"[stage_scail] free_vram end: {fre1}", flush=True)
 
@@ -721,52 +754,188 @@ def stage_joint_overshoot(
 
 
 def stage_time_overshoot(
-    run_id: str,
+    run_id: str | None = None,
     *,
     runs_dir: Path = RUNS_DIR,
+    upload_bytes: bytes | None = None,
+    upload_filename: str = "upload.mp4",
 ) -> dict:
     """Time-space spring remap on final action character video only.
 
-    Requires SCAIL ``action.mp4``. Idle is unchanged. No Comfy / no joint edit.
-    """
-    run_dir = Path(runs_dir) / run_id
-    meta = _load_meta(run_dir)
-    src = run_dir / "action.mp4"
-    if not meta.get("scail_done") and not src.is_file():
-        return {"run_id": run_id, "errors": {"time": "run SCAIL2 first (need action video)"}}
-    if not src.is_file():
-        return {"run_id": run_id, "errors": {"time": "missing action.mp4"}}
+    Source priority:
+      1. Optional uploaded video (saved as ``time_upload.*`` then used as src)
+      2. ``action_nobg.mp4`` if present (after bg remove)
+      3. ``action.mp4`` (SCAIL)
 
-    out: dict = {"run_id": run_id, "errors": {}, "seed": meta.get("seed")}
+    Idle is unchanged. No Comfy / no joint edit. Creates a run folder when
+    only an upload is provided (standalone time overshoot).
+    """
+    import shutil
+
+    runs_dir = Path(runs_dir)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Treat missing/stale run folders as "no session" (upload can still mint a new one).
+    if run_id and not (runs_dir / run_id).is_dir():
+        run_id = None
+
+    if not run_id:
+        if upload_bytes is None:
+            return {
+                "errors": {
+                    "time": "create a session or upload a video first"
+                }
+            }
+        run_id = uuid.uuid4().hex
+        run_dir = runs_dir / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        meta = {
+            "run_id": run_id,
+            "pose_mode": "standing",
+            "seed": 0,
+            "step": "time_overshoot_only",
+            "standalone_time_overshoot": True,
+        }
+        _save_meta(run_dir, meta)
+    else:
+        run_dir = runs_dir / run_id
+        try:
+            meta = _load_meta(run_dir)
+        except FileNotFoundError:
+            meta = {"run_id": run_id}
+
+    action_p = run_dir / "action.mp4"
+    nobg_p = run_dir / "action_nobg.mp4"
+    nobg_webm_p = run_dir / "action_nobg.webm"
+    nobg_alpha_p = run_dir / "action_nobg_alpha.mov"
+    upload_src: Path | None = None
+
+    if upload_bytes is not None:
+        ext = Path(upload_filename or "upload.mp4").suffix or ".mp4"
+        if ext.lower() not in (".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v"):
+            ext = ".mp4"
+        upload_src = run_dir / f"time_upload{ext}"
+        upload_src.write_bytes(upload_bytes)
+
+    # Prefer real-alpha sources so time remap does not bake a solid background.
+    # Priority: upload → action_nobg.webm → action_nobg_alpha.mov → action_nobg.mp4 → action.mp4
+    if upload_src is not None and upload_src.is_file():
+        src = upload_src
+        time_source = "upload"
+    elif nobg_webm_p.is_file():
+        src = nobg_webm_p
+        time_source = "action_nobg_webm"
+    elif nobg_alpha_p.is_file():
+        src = nobg_alpha_p
+        time_source = "action_nobg_alpha"
+    elif nobg_p.is_file():
+        src = nobg_p
+        time_source = "action_nobg"
+    else:
+        src = action_p
+        time_source = "action"
+
+    if not src.is_file():
+        return {
+            "run_id": run_id,
+            "errors": {
+                "time": (
+                    "missing video — upload a file, or generate action.mp4 / "
+                    "action_nobg.* in this session"
+                )
+            },
+        }
+
+    out: dict = {
+        "run_id": run_id,
+        "errors": {},
+        "seed": meta.get("seed"),
+        "time_source": time_source,
+    }
+    if upload_src is not None:
+        out["time_upload"] = _rel_url(upload_src)
+
     try:
         timed = run_dir / "action_timed.mp4"
-        time_remap_file(src, timed, **TIME_SPRING)
-        # Keep a browser-primary path too: some players cache action.mp4 by URL stem.
-        # Replace action.mp4 with timed H.264 so /runs/.../action.mp4 is always playable.
+        timed_webm = run_dir / "action_timed.webm"
+        remap = time_remap_file(
+            src,
+            timed,
+            out_webm=timed_webm,
+            prefer_alpha=True,
+            **TIME_SPRING,
+        )
+        # Backup original SCAIL (with bg) once when remapping session action.
         raw_backup = run_dir / "action_scail.mp4"
-        if not raw_backup.is_file() and src.is_file():
+        if (
+            time_source not in ("upload",)
+            and not raw_backup.is_file()
+            and action_p.is_file()
+        ):
             try:
-                import shutil
-                shutil.copy2(src, raw_backup)
+                shutil.copy2(action_p, raw_backup)
             except OSError:
                 pass
+        # Browser player uses action.mp4 (H.264; black under transparent regions).
         try:
-            import shutil
-            shutil.copy2(timed, src)
+            shutil.copy2(timed, action_p)
         except OSError:
             pass
-        # Prefer action.mp4 URL (cache-bust on client); also return timed.
-        out["action"] = _rel_url(src) or _rel_url(timed)
+        # Keep nobg preview mp4 in sync with timed black-composite preview.
+        if time_source.startswith("action_nobg") or remap.get("has_alpha"):
+            try:
+                shutil.copy2(timed, nobg_p)
+            except OSError:
+                pass
+            out["action_nobg"] = _rel_url(nobg_p)
+
+        # Preserve / refresh true-alpha exports for CapCut after time remap.
+        webm_out = remap.get("out_webm")
+        if webm_out and Path(webm_out).is_file():
+            try:
+                shutil.copy2(webm_out, nobg_webm_p)
+            except OSError:
+                pass
+            out["action_nobg_webm"] = _rel_url(nobg_webm_p)
+            try:
+                from pipeline.bgremove import webm_to_prores_alpha
+
+                webm_to_prores_alpha(nobg_webm_p, nobg_alpha_p)
+                out["action_nobg_alpha"] = _rel_url(nobg_alpha_p)
+            except Exception as alpha_exc:
+                # Soft warning only — timed mp4/webm already succeeded.
+                out.setdefault("warnings", {})["time_alpha"] = str(alpha_exc)
+                print(f"[time] alpha mov after remap failed: {alpha_exc}", flush=True)
+
+        out["action"] = _rel_url(action_p) or _rel_url(timed)
         out["action_timed"] = _rel_url(timed)
+        if timed_webm.is_file():
+            out["action_timed_webm"] = _rel_url(timed_webm)
+        out["has_alpha"] = bool(remap.get("has_alpha"))
+        out["step"] = "time_overshoot"
     except Exception as exc:
         out["errors"]["time"] = str(exc)
         return out
 
+    # Clear hard errors on success path (warnings may still be present).
+    if out.get("action") or out.get("action_timed"):
+        out["errors"] = {
+            k: v
+            for k, v in (out.get("errors") or {}).items()
+            if k not in ("time_alpha",)
+        }
+
     meta["time_overshoot"] = True
+    meta["time_overshoot_source"] = out.get("time_source")
+    meta["time_overshoot_has_alpha"] = bool(out.get("has_alpha"))
     meta["step"] = "time_overshoot"
     _save_meta(run_dir, meta)
+    idle_nobg = run_dir / "idle_nobg.mp4"
     idle_p = run_dir / "idle.mp4"
-    if idle_p.is_file():
+    if idle_nobg.is_file():
+        out["idle"] = _rel_url(idle_nobg)
+        out["idle_nobg"] = _rel_url(idle_nobg)
+    elif idle_p.is_file():
         out["idle"] = _rel_url(idle_p)
     return out
 
@@ -778,10 +947,14 @@ def _bgremove_one(
     *,
     model: str,
 ) -> dict:
-    """Run worker on one video; return dict of URL fields / error."""
+    """Run worker on one video; return dict of URL fields / error.
+
+    Also writes CapCut-friendly ``{label}_nobg_alpha.mov`` (ProRes 4444) from
+    the VP9 alpha WebM via libvpx-vp9 decode.
+    """
     import shutil
 
-    from pipeline.bgremove import run_bgremove
+    from pipeline.bgremove import run_bgremove, webm_to_prores_alpha
 
     piece: dict = {}
     if not src.is_file():
@@ -796,12 +969,23 @@ def _bgremove_one(
             dest_prev = run_dir / f"{label}_nobg.mp4"
             shutil.copy2(preview, dest_prev)
             piece["nobg"] = _rel_url(dest_prev)
+        webm_path: Path | None = None
         for p in result.get("outputs") or []:
             p = Path(p)
             if p.suffix.lower() == ".webm" and p.is_file():
                 dest_w = run_dir / f"{label}_nobg.webm"
                 shutil.copy2(p, dest_w)
                 piece["nobg_webm"] = _rel_url(dest_w)
+                webm_path = dest_w
+        if webm_path is not None:
+            try:
+                dest_mov = run_dir / f"{label}_nobg_alpha.mov"
+                webm_to_prores_alpha(webm_path, dest_mov)
+                piece["nobg_alpha"] = _rel_url(dest_mov)
+            except Exception as alpha_exc:
+                # WebM/preview still usable; surface alpha failure as soft error.
+                piece["alpha_error"] = str(alpha_exc)
+                print(f"[bgremove] alpha mov skip ({label}): {alpha_exc}", flush=True)
         if not piece.get("nobg") and not piece.get("nobg_webm"):
             piece["error"] = "worker produced no output files"
     except Exception as exc:
@@ -813,7 +997,7 @@ def stage_bgremove(
     run_id: str | None = None,
     *,
     which: str = "both",
-    model: str = "RVM MobileNetV3",
+    model: str = "RMBG-2.0 HQ",
     upload_bytes: bytes | None = None,
     upload_filename: str = "upload.mp4",
     runs_dir: Path = RUNS_DIR,
@@ -911,7 +1095,13 @@ def stage_bgremove(
             out[f"{label}_nobg"] = piece["nobg"]
         if piece.get("nobg_webm"):
             out[f"{label}_nobg_webm"] = piece["nobg_webm"]
+        if piece.get("nobg_alpha"):
+            out[f"{label}_nobg_alpha"] = piece["nobg_alpha"]
+        if piece.get("alpha_error"):
+            out["errors"][f"{label}_alpha"] = piece["alpha_error"]
         meta[f"{label}_bgremove_done"] = True
+        if piece.get("nobg_alpha"):
+            meta[f"{label}_nobg_alpha"] = True
 
     has_out = any(
         out.get(k)
@@ -922,6 +1112,9 @@ def stage_bgremove(
             "idle_nobg_webm",
             "action_nobg_webm",
             "upload_nobg_webm",
+            "idle_nobg_alpha",
+            "action_nobg_alpha",
+            "upload_nobg_alpha",
         )
     )
     if has_out:

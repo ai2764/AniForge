@@ -24,43 +24,130 @@ MOUTH_STILL_CLAUSE = (
     "no talking, no speaking, no lip movement, no chewing."
 )
 
-# Pose-agnostic: used for standing / sitting / lying (do not say "stand").
-# Source motion should have *some* natural idle amplitude; UI keep scales it down.
+# Live2D-style idle (product): short loop, head+chest breath, arms/legs locked.
 DEFAULT_IDLE_PROMPT = (
-    "A person holds their current pose in a relaxed idle with natural gentle motion: "
-    "soft continuous breathing, a slight weight shift, and subtle sway of the torso, "
-    "head, and arms. Keep the same overall posture; do not stand up or sit down; "
-    "no walking, no waving, no dancing, no large gestures. " + MOUTH_STILL_CLAUSE
+    "A person holds their current pose in a calm seamless idle loop. "
+    "Clear soft chest breathing: the chest and upper torso rise and fall "
+    "continuously and gently every breath cycle; subtle head nod and sway with the breath. "
+    "Shoulders follow the breath a little. Arms, hands, and legs stay still and fixed. "
+    "No waving, no gesturing, no walking, no dancing, no large joint rotations. "
+    "Do not stand up or sit down; keep the same overall posture. " + MOUTH_STILL_CLAUSE
 )
 
-# Default UI / API keep after extract anchor: extract + keep * (Kimodo deltas).
-IDLE_MOTION_KEEP = 0.06
-# If Kimodo idle is almost static, boost residual to this RMS so the keep slider works.
-IDLE_SOURCE_REF_STD = 0.012
+# UI keep: residual from Kimodo on head/torso only (arms/legs locked in post).
+IDLE_MOTION_KEEP = 0.12
+# Soft ceiling if we still normalize a near-static Kimodo residual.
+IDLE_SOURCE_REF_STD = 0.010
+# Live2D-like vertical bob ~0.55% of body height (was 0.2% — too subtle on SCAIL).
+IDLE_BREATH_PERIOD_S = 1.05
+IDLE_BOB_HEIGHT_FRAC = 0.0055
 # Action motion amount default: full Kimodo deltas on extract pose.
 ACTION_MOTION_KEEP = 1.0
 # Default Kimodo clip length for action (seconds @ model fps, usually 30).
 ACTION_DURATION_SEC = 2.0
-IDLE_DURATION_SEC = 3.0
+# Idle: short seamless loop (Live2D lobby/idle ~2s).
+IDLE_DURATION_SEC = 2.0
 # After retarget, if upper-body motion is weaker than this RMS, amplify it
 # so keep=100% is clearly different from idle micro-motion.
 ACTION_UPPER_REF_STD = 0.035
 
-# SCAIL positives for idle/action character drive (body only; face quiet).
+# SCAIL-2 official (zai-org): prompt describes the *finished video*, not instructions;
+# long detailed prompts usually beat short/empty ones. Pose still comes from the
+# guide; text reinforces identity, framing, motion, and mouth state (distill CFG~1
+# weakens negatives, so mouth calm belongs in the positive too).
+SCAIL_MOUTH_LOCK = ""  # legacy name; unused
+
+# ~90–120 word English paragraphs (official enhancer targets ~90–140 for replace).
 SCAIL_IDLE_POSITIVE = (
-    "a character in a calm idle pose, full body, consistent identity, "
-    "mouth closed, lips sealed, silent, no talking"
+    "A full-body character matching the reference image stands facing a fixed "
+    "frontal camera under soft even lighting, with clothing, hairstyle, colors, "
+    "and proportions held consistent across every frame. The character keeps the "
+    "same overall posture in a calm seamless idle loop: only tiny continuous chest "
+    "breathing and a very slight head nod and sway, shoulders barely moving. Arms, "
+    "hands, hips, and feet stay still and planted with no waving, gesturing, "
+    "walking, dancing, or large joint rotations. The face remains calm and still, "
+    "mouth closed, lips sealed, silent, with no talking, lip motion, or expression "
+    "change. Identity and wardrobe stay locked to the reference throughout."
 )
+
 SCAIL_ACTION_POSITIVE = (
-    "a character performing an action, full body, consistent identity, "
-    "mouth closed, lips sealed, silent, no talking, no lip sync"
+    "A full-body character matching the reference image stands facing a fixed "
+    "frontal camera under soft even lighting, with clothing, hairstyle, colors, "
+    "and proportions held consistent across every frame. The character performs one "
+    "clear upper-body action while the hips and feet stay planted; no walking, "
+    "stepping away, or body turn that breaks the frontal framing. Motion is smooth "
+    "and readable, limited to the limbs described by the action, without extra "
+    "gestures. The face stays calm and still, mouth closed, lips sealed, silent, "
+    "with no talking or lip motion. Identity and wardrobe remain locked to the "
+    "reference for the entire clip."
 )
-# SCAIL negative: template default plus mouth/speech blockers.
+
+# SCAIL negative: quality + anti-speech / anti-face-motion blockers.
 SCAIL_NEGATIVE = (
     "blurry, low quality, distorted, deformed, watermark, static, "
-    "talking, speaking, open mouth, mouth open, lip sync, lips moving, "
-    "mouth moving, chewing, singing, dialogue, shouting"
+    "talking, speaking, speech, dialogue, conversation, monologue, "
+    "open mouth, mouth open, mouth opening, mouth closing, mouth moving, "
+    "lips moving, lip movement, lip sync, lipsync, lip flap, mouth flap, "
+    "jaw opening, jaw moving, chewing, eating, singing, shouting, yelling, "
+    "whispering, smiling while talking, teeth showing, tongue out, "
+    "facial animation, face morphing, emotive mouth, viseme, phoneme"
 )
+
+
+def _strip_scail_action_for_embed(action_prompt: str) -> str:
+    """Motion-only snippet for embedding into a finished-video SCAIL prompt."""
+    p = (action_prompt or "").strip()
+    if not p:
+        return ""
+    # Drop mouth-still boilerplate; the SCAIL template already states it.
+    p = re.sub(
+        r"(?i)\.?\s*Mouth closed and still[^.]*(?:\.|$)",
+        ". ",
+        p,
+    )
+    p = re.sub(
+        r"(?i)\b(?:lips sealed|silent|no talking|no speaking|no lip movement|"
+        r"no chewing)\b[,.]?",
+        "",
+        p,
+    )
+    p = re.sub(r"\s{2,}", " ", p).strip(" ,.")
+    # Avoid sounding like an edit instruction.
+    p = re.sub(
+        r"(?i)^(please\s+)?(make|have|let)\s+(the\s+)?(character|person|her|him|them)\s+",
+        "",
+        p,
+    )
+    return p.strip(" ,.")
+
+
+def build_scail_positive(which: str, action_prompt: str | None = None) -> str:
+    """Build SCAIL-2 positive text: finished-video description (official style).
+
+    which: \"idle\" | \"action\"
+    For action, folds a cleaned user/Kimodo action line into the video description
+    so motion wording is concrete without becoming an edit instruction.
+    """
+    kind = (which or "idle").strip().lower()
+    if kind == "idle":
+        return SCAIL_IDLE_POSITIVE
+
+    motion = _strip_scail_action_for_embed(action_prompt or "")
+    if not motion:
+        return SCAIL_ACTION_POSITIVE
+
+    # One paragraph: scene + concrete motion + constraints (official rules 1–7).
+    return (
+        "A full-body character matching the reference image stands facing a fixed "
+        "frontal camera under soft even lighting, with clothing, hairstyle, colors, "
+        "and proportions held consistent across every frame. In this clip the "
+        f"character moves as follows: {motion.rstrip('.')}."
+        " Hips and feet remain planted; no walking, stepping away, or turning that "
+        "breaks the frontal framing. Motion stays limited to the described limbs "
+        "without extra gestures. The face remains calm and still, mouth closed, "
+        "lips sealed, silent, with no talking or lip motion. Identity and wardrobe "
+        "stay locked to the reference throughout."
+    )
 
 FPS = 30                      # Kimodo output is 30 fps
 JOINT_SPRING = dict(omega=20.0, zeta=0.35, soft=1.0)   # action joint-overshoot defaults
@@ -152,6 +239,107 @@ def dampen_idle_joints(posed_joints, keep: float = IDLE_MOTION_KEEP, base_pose=N
     if k >= 1.0:
         return base + deltas
     return base + k * deltas
+
+
+# SMPLX22 free DOF for Live2D-style idle (head + chest + light shoulders).
+# Locked: pelvis, legs, elbows, wrists.
+_IDLE_FREE_JOINTS = (3, 6, 9, 12, 13, 14, 15, 16, 17)
+
+
+def shape_live2d_idle(
+    posed_joints,
+    base_pose=None,
+    keep: float = IDLE_MOTION_KEEP,
+    *,
+    fps: float = FPS,
+    period_s: float = IDLE_BREATH_PERIOD_S,
+    bob_frac: float = IDLE_BOB_HEIGHT_FRAC,
+):
+    """Live2D-product idle: short seamless loop, head/chest micro, arms/legs fixed.
+
+    1. Anchor to extract ``base_pose`` (frame 0 exact).
+    2. Apply Kimodo residual only on free joints, scaled by ``keep``.
+    3. Add low-frequency sine breath/bob (~0.95s period, ~0.2% height).
+    4. Lock arms/hands/legs/pelvis to base every frame.
+    5. Blend last ~12% of frames to frame 0 for permanent loop.
+    """
+    import numpy as np
+
+    P = np.asarray(posed_joints, dtype=np.float64)
+    if P.ndim != 3 or P.shape[0] < 1:
+        return P.astype(np.float64, copy=False)
+    T, J, _ = P.shape
+    try:
+        k = float(keep)
+    except (TypeError, ValueError):
+        k = IDLE_MOTION_KEEP
+    k = max(0.0, min(1.0, k))
+
+    if base_pose is not None:
+        base = np.asarray(base_pose, dtype=np.float64).reshape(J, 3).copy()
+    else:
+        base = P[0].copy()
+
+    free = [j for j in _IDLE_FREE_JOINTS if j < J]
+    lock = [j for j in range(J) if j not in free]
+
+    deltas = P - P[0:1]
+    out = np.repeat(base[None, ...], T, axis=0)
+    if k > 0.0 and T >= 2:
+        for j in free:
+            out[:, j, :] = base[j] + k * deltas[:, j, :]
+
+    try:
+        period = float(period_s) if period_s and period_s > 0 else IDLE_BREATH_PERIOD_S
+    except (TypeError, ValueError):
+        period = IDLE_BREATH_PERIOD_S
+    try:
+        f = float(fps) if fps and fps > 0 else float(FPS)
+    except (TypeError, ValueError):
+        f = float(FPS)
+    dur = max(T / f, 1e-6)
+    n_cycles = max(1, int(round(dur / period)))
+    omega = 2.0 * np.pi * n_cycles / dur
+    t = np.arange(T, dtype=np.float64) / f
+    phase = np.sin(omega * t)
+    phase2 = np.sin(omega * t + 0.45)
+
+    if J > 15:
+        height = float(np.linalg.norm(base[15] - base[0]))
+    else:
+        height = float(np.linalg.norm(base[min(9, J - 1)] - base[0]))
+    height = max(height, 0.5)
+    try:
+        bf = float(bob_frac) if bob_frac and bob_frac > 0 else IDLE_BOB_HEIGHT_FRAC
+    except (TypeError, ValueError):
+        bf = IDLE_BOB_HEIGHT_FRAC
+    amp = height * bf
+
+    # Stronger chest/spine rise-fall so breath reads after SCAIL (still arms locked).
+    for j, a in ((9, 1.15), (6, 0.95), (3, 0.7), (12, 0.75), (15, 0.55)):
+        if j < J:
+            out[:, j, 1] = out[:, j, 1] + amp * a * phase
+            out[:, j, 0] = out[:, j, 0] + amp * 0.28 * a * phase2
+            out[:, j, 2] = out[:, j, 2] + amp * 0.12 * a * phase
+    for j, s in ((16, 0.45), (17, 0.45), (13, 0.35), (14, 0.35)):
+        if j < J:
+            out[:, j, 1] = out[:, j, 1] + amp * 0.55 * phase
+            out[:, j, 0] = out[:, j, 0] + amp * 0.18 * s * phase2
+
+    if lock:
+        out[:, lock, :] = base[lock, :]
+
+    if T >= 8:
+        blend_n = max(2, int(round(0.12 * T)))
+        for i in range(blend_n):
+            a = (i + 1) / float(blend_n)
+            idx = T - blend_n + i
+            out[idx] = (1.0 - a) * out[idx] + a * out[0]
+        if lock:
+            out[:, lock, :] = base[lock, :]
+
+    out[0] = base
+    return out
 
 
 # SMPLX22 lower body (pelvis/legs/feet) — keep seated/lying root from extract.
@@ -361,11 +549,18 @@ def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
     # Phase 2: drive the character image with BOTH guides (SCAIL model stays hot).
     if idle_guide is not None:
         try:
-            result["idle"] = drive_character(
+            idle_path = drive_character(
                 client, idle_guide, image, run_dir / "idle.mp4",
                 length=idle_len, width=out_w, height=out_h, prefix="mp_idle", seed=seed,
-                positive=SCAIL_IDLE_POSITIVE,
+                positive=build_scail_positive("idle"),
+                negative=SCAIL_NEGATIVE,
                 comfy_input=comfy_input)
+            try:
+                from pipeline.face_lock import lock_mouth_in_video
+                lock_mouth_in_video(idle_path, in_place=True, strength=1.0)
+            except Exception as lock_exc:
+                result.setdefault("warnings", {})["idle_mouth_lock"] = str(lock_exc)
+            result["idle"] = idle_path
         except Exception as exc:
             result["errors"]["idle_scail"] = str(exc)
 
@@ -374,8 +569,14 @@ def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
             action_path = drive_character(
                 client, action_guide, image, run_dir / "action.mp4",
                 length=action_len, width=out_w, height=out_h, prefix="mp_action", seed=seed,
-                positive=SCAIL_ACTION_POSITIVE,
+                positive=build_scail_positive("action", action_prompt),
+                negative=SCAIL_NEGATIVE,
                 comfy_input=comfy_input)
+            try:
+                from pipeline.face_lock import lock_mouth_in_video
+                lock_mouth_in_video(action_path, in_place=True, strength=1.0)
+            except Exception as lock_exc:
+                result.setdefault("warnings", {})["action_mouth_lock"] = str(lock_exc)
             if plan["time"]:
                 try:
                     time_remap_file(action_path, run_dir / "action_timed.mp4", **TIME_SPRING)
