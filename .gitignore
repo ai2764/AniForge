@@ -20,6 +20,7 @@ _tmp*
 body.txt
 body2.txt
 *.local.md
+docs/readme-assets/_cand_*
 
 # OS / editor
 .DS_Store

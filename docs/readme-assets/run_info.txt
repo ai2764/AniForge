@@ -3,3 +3,16 @@ action_prompt: Slowly bring both hands to the waist and rest them firmly on the 
 seed: 42
 size: 720x1280
 bgremove_model: RMBG-2.0 HQ
+
+# showcase frame timestamps (ffmpeg -ss)
+idle_frame_s: 0.5
+  sources: idle_skel.mp4, idle.mp4, idle_nobg.mp4
+action_frame_s: 1.1
+  sources: action_skel.mp4, action.mp4, action_nobg.mp4, action_timed.mp4
+  selection: sampled action_skel/action at 0.3, 0.6, 0.8, 0.9, 1.0, 1.1, 1.2, 1.5s;
+    also used SMPL posed_joints (action_seed42.npz) — min wrist–hip |y| gap at frame 33
+    (~1.1s @ 30fps) and strong elbow bend (~0.9–1.1s). Chose 1.1s as hands-on-hips hold.
+  candidates saved as: _cand_action_skel_*.png, _cand_action_*.png
+extract: copy extract_skel.png (static)
+input: copy input.png
+thumbs: docs/readme-assets/thumbs/ scale width=280 keep aspect
