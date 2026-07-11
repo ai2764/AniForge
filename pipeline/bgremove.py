@@ -1,7 +1,7 @@
 """Video background removal via external videoBGremoval worker (subprocess).
 
 Isolates RVM/RMBG VRAM: process exit unloads models. Does not import torch
-into the motion-portrait server process.
+into the AniForge server process.
 """
 from __future__ import annotations
 

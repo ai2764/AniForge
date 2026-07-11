@@ -48,7 +48,7 @@ a ComfyUI graph** — it wedges VRAM that only a server restart clears.
   reusable for standing OR sitting inputs.
 
 ## Run
-    cd motion-portrait
+    cd AniForge
     python pipeline/seated/run_seated_pipeline.py [path/to/ref.png] --pose sitting
     python pipeline/seated/run_seated_pipeline.py [path/to/ref.png] --pose lying
 

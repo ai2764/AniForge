@@ -1,4 +1,4 @@
-"""Batch-run motion-portrait on Live2D opening standees with per-character actions.
+"""Batch-run AniForge on Live2D opening standees with per-character actions.
 
 Order: session → extract → idle → action → SCAIL idle/action → bgremove.
 """
