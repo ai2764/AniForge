@@ -33,7 +33,6 @@ from pipeline.generate import (
     _pad_to_aspect,
     align_4k1,
     build_scail_positive,
-    ensure_mouth_still,
     plan_steps,
     sanitize_action,
 )
@@ -196,7 +195,8 @@ def generate_anchored(
         "pose_mode": pose_mode,
     }
 
-    idle_text = ensure_mouth_still((idle_prompt or "").strip() or DEFAULT_IDLE_PROMPT)
+    # No ensure_mouth_still: idle drives a jawless skeleton; mouth control is SCAIL's.
+    idle_text = (idle_prompt or "").strip() or DEFAULT_IDLE_PROMPT
     # Action prompt is user-authored only — no product default (mouth still is enforced).
     if not (action_prompt or "").strip():
         raise ValueError("action_prompt is required (no default)")

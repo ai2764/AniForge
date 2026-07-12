@@ -28,7 +28,6 @@ from pipeline.generate import (
     align_4k1,
     align_motion_to_base_pose,
     dampen_idle_joints,
-    ensure_mouth_still,
     prepare_idle_source_motion,
     plan_steps,
     sanitize_action,
@@ -304,7 +303,8 @@ def stage_idle(
         default=IDLE_MOTION_KEEP,
     )
     out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
-    idle_text = ensure_mouth_still((idle_prompt or "").strip() or DEFAULT_IDLE_PROMPT)
+    # No ensure_mouth_still: idle drives a jawless skeleton; mouth control is SCAIL's.
+    idle_text = (idle_prompt or "").strip() or DEFAULT_IDLE_PROMPT
     out: dict = {
         "run_id": run_id,
         "errors": {},
@@ -693,12 +693,20 @@ def stage_scail(
 def stage_joint_overshoot(
     run_id: str,
     *,
+    apply: bool = True,
+    omega: float | None = None,
+    zeta: float | None = None,
+    soft: float | None = None,
     runs_dir: Path = RUNS_DIR,
 ) -> dict:
     """Joint-space spring on action skeleton only (no SCAIL, no video remap).
 
     Springs from raw Kimodo ``action_seed*.npz``, rewrites ``action_skel`` /
     ``action_guide`` so the next SCAIL step uses the overshot motion.
+
+    ``apply=False`` reverts: re-render the plain action skeleton from the same
+    raw npz *without* the spring (cheap — no Kimodo re-sample), so unchecking the
+    overshoot toggle restores the pre-overshoot motion.
     """
     run_dir = Path(runs_dir) / run_id
     meta = _load_meta(run_dir)
@@ -717,12 +725,13 @@ def stage_joint_overshoot(
             out["errors"]["joint"] = "missing action_seed npz — re-run action motion"
             return out
         P = np.asarray(np.load(raw)["posed_joints"], dtype=np.float64)
-        P = spring_follow(
-            P, FPS,
-            omega=JOINT_SPRING["omega"],
-            zeta=JOINT_SPRING["zeta"],
-            soft_scale=JOINT_SPRING["soft"],
-        )
+        if apply:
+            P = spring_follow(
+                P, FPS,
+                omega=JOINT_SPRING["omega"] if omega is None else float(omega),
+                zeta=JOINT_SPRING["zeta"] if zeta is None else float(zeta),
+                soft_scale=JOINT_SPRING["soft"] if soft is None else float(soft),
+            )
         # Re-stick start pose after spring (idle frame0 / extract).
         pose_mode = meta.get("pose_mode", "standing")
         base, cam, _src = _load_action_base_pose(run_dir, seed)
@@ -731,7 +740,8 @@ def stage_joint_overshoot(
                 P, base, keep=1.0,
                 lock_lower_body=pose_mode in ("sitting", "lying"),
             )
-        np.savez(run_dir / f"action_joint_seed{seed}.npz", posed_joints=P)
+        if apply:
+            np.savez(run_dir / f"action_joint_seed{seed}.npz", posed_joints=P)
         skel = run_dir / "action_skel.mp4"
         guide = run_dir / "action_guide.mp4"
         render_smplx_guide(P, skel, camera=cam)
@@ -745,10 +755,10 @@ def stage_joint_overshoot(
         out["errors"]["joint"] = str(exc)
         return out
 
-    meta["joint_overshoot"] = True
+    meta["joint_overshoot"] = bool(apply)
     meta["action_scail_done"] = False
     meta["scail_done"] = False  # guides changed — need SCAIL again
-    meta["step"] = "action_joint"
+    meta["step"] = "action_joint" if apply else "action"
     _save_meta(run_dir, meta)
     return out
 

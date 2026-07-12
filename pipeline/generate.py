@@ -24,23 +24,27 @@ MOUTH_STILL_CLAUSE = (
     "no talking, no speaking, no lip movement, no chewing."
 )
 
-# Live2D-style idle (product): short loop, head+chest breath, arms/legs locked.
+# Live2D-style idle (product): short loop, livelier torso, arms/legs locked.
+# Pose-neutral wording (no stand/sit/lie) so it fits every pose_mode. No mouth
+# clause: the Kimodo skeleton has no jaw/face joints, so mouth wording is inert
+# here — mouth control lives in the SCAIL prompts, which render the actual face.
 DEFAULT_IDLE_PROMPT = (
-    "A person holds their current pose in a calm seamless idle loop. "
-    "Clear soft chest breathing: the chest and upper torso rise and fall "
-    "continuously and gently every breath cycle; subtle head nod and sway with the breath. "
-    "Shoulders follow the breath a little. Arms, hands, and legs stay still and fixed. "
-    "No waving, no gesturing, no walking, no dancing, no large joint rotations. "
-    "Do not stand up or sit down; keep the same overall posture. " + MOUTH_STILL_CLAUSE
+    "A calm, continuously moving idle loop. Soft steady breathing lifts and lowers "
+    "the chest and upper belly every cycle; the torso and spine gently sway and lean "
+    "a little with the breath, and the shoulders rise and ease each time. The head "
+    "makes small natural nods and slow side-to-side sways so the body never looks "
+    "frozen. Keep every movement gentle, subtle, and continuous, with no large joint "
+    "rotations, returning smoothly to a seamless loop."
 )
 
 # UI keep: residual from Kimodo on head/torso only (arms/legs locked in post).
-IDLE_MOTION_KEEP = 0.12
+# Bumped 0.12 -> 0.20 for more visible torso micro-motion.
+IDLE_MOTION_KEEP = 0.20
 # Soft ceiling if we still normalize a near-static Kimodo residual.
 IDLE_SOURCE_REF_STD = 0.010
-# Live2D-like vertical bob ~0.55% of body height (was 0.2% — too subtle on SCAIL).
+# Live2D-like vertical bob ~0.9% of body height (0.55% read too static on SCAIL).
 IDLE_BREATH_PERIOD_S = 1.05
-IDLE_BOB_HEIGHT_FRAC = 0.0055
+IDLE_BOB_HEIGHT_FRAC = 0.009
 # Action motion amount default: full Kimodo deltas on extract pose.
 ACTION_MOTION_KEEP = 1.0
 # Default Kimodo clip length for action (seconds @ model fps, usually 30).
@@ -62,8 +66,9 @@ SCAIL_IDLE_POSITIVE = (
     "A full-body character matching the reference image stands facing a fixed "
     "frontal camera under soft even lighting, with clothing, hairstyle, colors, "
     "and proportions held consistent across every frame. The character keeps the "
-    "same overall posture in a calm seamless idle loop: only tiny continuous chest "
-    "breathing and a very slight head nod and sway, shoulders barely moving. Arms, "
+    "same overall posture in a calm seamless idle loop: soft continuous chest and "
+    "torso breathing with a gentle spine sway, a slight head nod and sway, and "
+    "shoulders easing with the breath. Arms, "
     "hands, hips, and feet stay still and planted with no waving, gesturing, "
     "walking, dancing, or large joint rotations. The face remains calm and still, "
     "mouth closed, lips sealed, silent, with no talking, lip motion, or expression "
@@ -342,13 +347,17 @@ def shape_live2d_idle(
     return out
 
 
-# SMPLX22 lower body (pelvis/legs/feet) — keep seated/lying root from extract.
+# SMPLX22 lower body (pelvis/legs/feet) — used for the upper/lower split (boost).
 # Names: pelvis, L_hip, R_hip, L_knee, R_knee, L_ankle, R_ankle, L_foot, R_foot
 SMPLX22_LOWER_BODY = (0, 1, 2, 4, 5, 7, 8, 10, 11)
 # Spine + arms + head (everything not lower body)
 SMPLX22_UPPER_BODY = tuple(
     i for i in range(22) if i not in SMPLX22_LOWER_BODY
 )
+# Seated/lying action lock set: pin only the pelvis root so it does not drift,
+# leaving legs and feet free to follow Kimodo. Use SMPLX22_LOWER_BODY here to
+# also stick knees/ankles/feet if legs flail out of the seated/lying pose.
+SMPLX22_HIPS_ONLY = (0,)
 
 
 def align_motion_to_base_pose(
@@ -366,7 +375,8 @@ def align_motion_to_base_pose(
         P'[0] = base   (hard)
 
     keep=1: full action deltas. keep=0: frozen base.
-    lock_lower_body: pin pelvis+legs to base every frame (sitting/lying).
+    lock_lower_body: pin only the pelvis root to base every frame (sitting/lying),
+    leaving legs and feet free.
     boost_upper: if upper-body residual is tiny, amplify toward upper_ref_std
     so keep=100% is visibly different from idle.
     """
@@ -421,8 +431,8 @@ def align_motion_to_base_pose(
         out = base[None, ...] + k * (out - base[None, ...])
         out[0] = base
     if lock_lower_body:
-        lower = [j for j in SMPLX22_LOWER_BODY if j < out.shape[1]]
-        out[:, lower, :] = base[lower, :]
+        lock = [j for j in SMPLX22_HIPS_ONLY if j < out.shape[1]]
+        out[:, lock, :] = base[lock, :]
         out[0] = base
     return out
 
@@ -537,7 +547,7 @@ def generate(image: Path, action_prompt: str, idle_prompt, overshoot: set,
     idle_len = action_len = None
     try:
         idle_guide, idle_len = _build_guide(
-            client, ensure_mouth_still(idle_prompt or DEFAULT_IDLE_PROMPT),
+            client, (idle_prompt or DEFAULT_IDLE_PROMPT),
             run_dir / "idle.npz", run_dir / "idle_skel.mp4", run_dir / "idle_guide.mp4",
             model=motion_model, seed=seed, comfy_output=comfy_output, joint=False,
             out_w=out_w, out_h=out_h, dampen_idle=True)
