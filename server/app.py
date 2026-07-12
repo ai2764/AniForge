@@ -420,8 +420,8 @@ class Handler(BaseHTTPRequestHandler):
             if not run_id or not (RUNS_DIR / run_id).is_dir():
                 self._send_json(400, {"error": "invalid run_id"})
                 return
-            # apply=1 (default): spring overshoot. apply=0: revert to plain skeleton.
-            apply = str(form.getvalue("apply", "1")).strip().lower() not in ("0", "false", "no", "")
+            # mode: preview (render overshot preview) | carry | uncarry (guide only)
+            mode = (str(form.getvalue("mode", "preview")).strip().lower() or "preview")
 
             def _optfloat(name):
                 raw = form.getvalue(name, "")
@@ -432,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
 
             result = stage_joint_overshoot(
                 run_id,
-                apply=apply,
+                mode=mode,
                 omega=_optfloat("joint_omega"),
                 zeta=_optfloat("joint_zeta"),
                 soft=_optfloat("joint_soft"),

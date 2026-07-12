@@ -693,74 +693,90 @@ def stage_scail(
 def stage_joint_overshoot(
     run_id: str,
     *,
-    apply: bool = True,
+    mode: str = "preview",
     omega: float | None = None,
     zeta: float | None = None,
     soft: float | None = None,
     runs_dir: Path = RUNS_DIR,
 ) -> dict:
-    """Joint-space spring on action skeleton only (no SCAIL, no video remap).
+    """Non-destructive joint-overshoot on the action skeleton.
 
-    Springs from raw Kimodo ``action_seed*.npz``, rewrites ``action_skel`` /
-    ``action_guide`` so the next SCAIL step uses the overshot motion.
-
-    ``apply=False`` reverts: re-render the plain action skeleton from the same
-    raw npz *without* the spring (cheap — no Kimodo re-sample), so unchecking the
-    overshoot toggle restores the pre-overshoot motion.
+    mode="preview": spring raw ``action_seed`` with the given params, save
+        ``action_joint_seed`` + render ``action_joint_skel.mp4``. Never touches
+        ``action_skel.mp4`` / ``action_guide.mp4``.
+    mode="carry": (re)pad the overshot skeleton into ``action_guide.mp4`` so SCAIL
+        uses it. Self-springs a preview first if none exists (Run-all one-shot).
+    mode="uncarry": re-pad the plain ``action_skel.mp4`` into ``action_guide.mp4``.
     """
     run_dir = Path(runs_dir) / run_id
     meta = _load_meta(run_dir)
     if not meta.get("action_done"):
-        return {"run_id": run_id, "errors": {"joint": "run action skeleton first"}}
+        return {"run_id": run_id, "errors": {"joint": "run action skeleton first"}, "mode": mode}
 
     seed = meta["seed"]
     scale = meta.get("scale", 1.0)
     image = _find_image(run_dir)
     out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
-    out: dict = {"run_id": run_id, "errors": {}, "seed": seed, "size": [out_w, out_h]}
+    out: dict = {"run_id": run_id, "errors": {}, "mode": mode, "seed": seed, "size": [out_w, out_h]}
 
-    try:
-        raw = run_dir / f"action_seed{seed}.npz"
-        if not raw.is_file():
-            out["errors"]["joint"] = "missing action_seed npz — re-run action motion"
-            return out
+    raw = run_dir / f"action_seed{seed}.npz"
+    joint_npz = run_dir / f"action_joint_seed{seed}.npz"
+    joint_skel = run_dir / "action_joint_skel.mp4"
+    action_skel = run_dir / "action_skel.mp4"
+    guide = run_dir / "action_guide.mp4"
+
+    def _spring_preview():
         P = np.asarray(np.load(raw)["posed_joints"], dtype=np.float64)
-        if apply:
-            P = spring_follow(
-                P, FPS,
-                omega=JOINT_SPRING["omega"] if omega is None else float(omega),
-                zeta=JOINT_SPRING["zeta"] if zeta is None else float(zeta),
-                soft_scale=JOINT_SPRING["soft"] if soft is None else float(soft),
-            )
-        # Re-stick start pose after spring (idle frame0 / extract).
+        P = spring_follow(
+            P, FPS,
+            omega=JOINT_SPRING["omega"] if omega is None else float(omega),
+            zeta=JOINT_SPRING["zeta"] if zeta is None else float(zeta),
+            soft_scale=JOINT_SPRING["soft"] if soft is None else float(soft),
+        )
         pose_mode = meta.get("pose_mode", "standing")
         base, cam, _src = _load_action_base_pose(run_dir, seed)
         if base is not None:
             P = align_motion_to_base_pose(
-                P, base, keep=1.0,
-                lock_lower_body=pose_mode in ("sitting", "lying"),
+                P, base, keep=1.0, lock_lower_body=pose_mode in ("sitting", "lying"),
             )
-        if apply:
-            np.savez(run_dir / f"action_joint_seed{seed}.npz", posed_joints=P)
-        skel = run_dir / "action_skel.mp4"
-        guide = run_dir / "action_guide.mp4"
-        render_smplx_guide(P, skel, camera=cam)
-        _pad_to_aspect(skel, guide, out_w, out_h)
-        out["skeleton"] = _rel_url(skel)
-        png = skel.with_suffix(".png")
-        out["skeleton_png"] = _rel_url(png) if png.is_file() else None
-        out["n_frames"] = int(P.shape[0])
-        out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+        np.savez(joint_npz, posed_joints=P)
+        render_smplx_guide(P, joint_skel, camera=cam)
+        return P
+
+    try:
+        if not raw.is_file():
+            out["errors"]["joint"] = "missing action_seed npz — re-run action motion"
+            return out
+
+        if mode == "preview":
+            P = _spring_preview()
+            out["skeleton"] = _rel_url(joint_skel)
+            out["n_frames"] = int(P.shape[0])
+            out["motion_std"] = float(np.asarray(P).std(axis=0).mean())
+            return out
+
+        if mode == "carry":
+            if not joint_skel.is_file():
+                _spring_preview()  # self-spring for the Run-all one-shot path
+            _pad_to_aspect(joint_skel, guide, out_w, out_h)
+            meta["joint_overshoot"] = True
+        elif mode == "uncarry":
+            _pad_to_aspect(action_skel, guide, out_w, out_h)
+            meta["joint_overshoot"] = False
+        else:
+            out["errors"]["joint"] = f"unknown mode {mode!r}"
+            return out
+
+        meta["action_scail_done"] = False
+        meta["scail_done"] = False
+        meta["step"] = "action_joint" if mode == "carry" else "action"
+        _save_meta(run_dir, meta)
+        out["joint_overshoot"] = bool(meta["joint_overshoot"])
+        out["guide"] = _rel_url(guide)
+        return out
     except Exception as exc:
         out["errors"]["joint"] = str(exc)
         return out
-
-    meta["joint_overshoot"] = bool(apply)
-    meta["action_scail_done"] = False
-    meta["scail_done"] = False  # guides changed — need SCAIL again
-    meta["step"] = "action_joint" if apply else "action"
-    _save_meta(run_dir, meta)
-    return out
 
 
 def stage_time_overshoot(
