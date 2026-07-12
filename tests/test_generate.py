@@ -47,7 +47,9 @@ def test_ensure_mouth_still_idempotent():
     b = ensure_mouth_still(a)
     assert a.count("Mouth closed") == 1
     assert b == a
-    assert "mouth closed" in DEFAULT_IDLE_PROMPT.lower()
+    # Idle drives a jawless skeleton; the mouth clause is inert there and was
+    # dropped from the idle prompt (mouth control lives in the SCAIL prompts).
+    assert "mouth" not in DEFAULT_IDLE_PROMPT.lower()
     assert "no talking" in MOUTH_STILL_CLAUSE.lower()
 
 
@@ -78,9 +80,12 @@ def test_scail_prompts_finished_video_style():
 def test_default_idle_keeps_pose_and_avoids_large_motion():
     p = DEFAULT_IDLE_PROMPT.lower()
     assert "idle" in p and ("breathing" in p or "chest" in p)
-    assert "arms" in p and ("still" in p or "fixed" in p)
-    assert "do not stand up" in p
-    assert "stands nearly" not in p
+    # Amplitude is bounded to an idle by wording, not posture instructions.
+    assert "no large joint rotations" in p
+    assert "seamless loop" in p
+    # Pose-neutral (fits standing/sitting/lying) — no posture verbs, no mouth clause.
+    assert "stand up" not in p and "sit down" not in p
+    assert "mouth" not in p
     assert IDLE_DURATION_SEC == 2.0
 
 
@@ -173,7 +178,7 @@ def test_align_boost_upper_increases_weak_arm_motion():
     assert np.allclose(out[0], base)
     assert np.allclose(out[:, 0, :], base[0])  # pelvis locked
     # wrist motion amplified well above the tiny raw wiggle
-    assert float(out[:, 20, 1].ptp()) > 0.05
+    assert float(np.ptp(out[:, 20, 1])) > 0.05  # ndarray.ptp() removed in numpy 2.0
 
 
 def test_output_size_keeps_aspect_and_scale(tmp_path):
