@@ -1191,7 +1191,8 @@ def stage_overshoot(
         out["errors"]["overshoot"] = "select joint and/or time overshoot"
         return out
     if plan["joint"]:
-        j = stage_joint_overshoot(run_id, runs_dir=runs_dir)
+        # mode="carry" reproduces the old apply-then-SCAIL behaviour (default is now "preview").
+        j = stage_joint_overshoot(run_id, mode="carry", runs_dir=runs_dir)
         out.update({k: v for k, v in j.items() if k != "errors"})
         if j.get("errors"):
             out.setdefault("errors", {}).update(j["errors"])
