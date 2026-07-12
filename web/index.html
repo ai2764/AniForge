@@ -495,40 +495,32 @@
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">Springy follow-through on the action skeleton (before SCAIL). Set the spring, then <strong>check "Carry into SCAIL"</strong> to apply it — the overshot skeleton is what SCAIL will drive. Uncheck to revert to the plain action skeleton (no Kimodo re-sample). Adjusting a slider while carried re-applies.</p>
+        <p class="pose-hint">Springy follow-through on the action skeleton. Set the spring, click <strong>Preview</strong> to render it (non-destructive), compare against the original, then <strong>Carry into SCAIL</strong> to make SCAIL use the overshot version.</p>
         <div>
-          <div class="label-with-info">
-            <label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label>
-            <span class="info-tip" tabindex="0" role="img" aria-label="About omega">i
-              <span class="info-bubble">How fast joints spring toward the target. Higher = quicker, snappier follow-through.</span>
-            </span>
-          </div>
+          <div class="label-with-info"><label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label></div>
           <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
         </div>
         <div>
-          <div class="label-with-info">
-            <label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label>
-            <span class="info-tip" tabindex="0" role="img" aria-label="About zeta">i
-              <span class="info-bubble">Damping ratio. Lower = more bounce/overshoot; higher = settles fast with little overshoot.</span>
-            </span>
-          </div>
+          <div class="label-with-info"><label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label></div>
           <input type="range" id="joint_zeta" name="joint_zeta" min="0.05" max="1" step="0.05" value="0.35">
         </div>
         <div>
-          <div class="label-with-info">
-            <label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label>
-            <span class="info-tip" tabindex="0" role="img" aria-label="About soft">i
-              <span class="info-bubble">Scales per-joint softness (distal joints overshoot more). 0 = rigid, 2 = very loose.</span>
-            </span>
-          </div>
+          <div class="label-with-info"><label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label></div>
           <input type="range" id="joint_soft" name="joint_soft" min="0" max="2" step="0.1" value="1">
         </div>
-        <label id="lbl-joint-carry" style="opacity:0.5"><input type="checkbox" id="joint-carry" disabled> Carry into SCAIL (apply overshoot)</label>
+        <button type="button" id="btn-joint-preview" disabled>Preview overshoot</button>
+        <label id="lbl-joint-carry" style="opacity:0.5"><input type="checkbox" id="joint-carry" disabled> Carry into SCAIL</label>
       </div>
       <div class="preview-col">
-        <div class="preview-box" id="box-joint-skel">
-          <div class="preview-label">Overshot action skeleton</div>
-          <video id="vid-joint-skel" muted loop playsinline controls autoplay></video>
+        <div class="preview-row">
+          <div class="preview-box show" id="box-joint-before">
+            <div class="preview-label">Original</div>
+            <video id="vid-joint-before" muted loop playsinline autoplay></video>
+          </div>
+          <div class="preview-box show" id="box-joint-after">
+            <div class="preview-label">Overshot preview</div>
+            <video id="vid-joint-after" muted loop playsinline autoplay></video>
+          </div>
         </div>
       </div>
     </div>

@@ -22,7 +22,9 @@
   const jointOmegaLabel = document.getElementById("joint_omega_label");
   const jointZetaLabel = document.getElementById("joint_zeta_label");
   const jointSoftLabel = document.getElementById("joint_soft_label");
-  const vidJointSkel = document.getElementById("vid-joint-skel");
+  const btnJointPreview = document.getElementById("btn-joint-preview");
+  const vidJointBefore = document.getElementById("vid-joint-before");
+  const vidJointAfter = document.getElementById("vid-joint-after");
   const btnScailIdle = document.getElementById("btn-scail-idle");
   const btnScailAction = document.getElementById("btn-scail-action");
   const btnScailDefaults = document.getElementById("btn-scail-defaults");
@@ -384,7 +386,9 @@
     btnExtract.disabled = on || !runId;
     btnIdle.disabled = on || !runId || secIdle.classList.contains("locked");
     btnAction.disabled = on || !runId || secAction.classList.contains("locked");
-    setJointCarryEnabled(!on && !!runId && actionSkelReady);
+    if (btnJointPreview) btnJointPreview.disabled = on || !runId || !actionSkelReady;
+    // carry enable is managed by preview success; just re-disable while busy
+    if (chkJointCarry && on) chkJointCarry.disabled = true;
     if (btnScailIdle) {
       btnScailIdle.disabled = on || !runId || !idleSkelReady;
     }
@@ -496,6 +500,9 @@
     if (chkJointCarry) chkJointCarry.checked = false;
     setJointCarryEnabled(false);
     if (secJoint && badgeJoint) lock(secJoint, badgeJoint, "locked");
+    if (btnJointPreview) btnJointPreview.disabled = true;
+    if (vidJointBefore) vidJointBefore.removeAttribute("src");
+    if (vidJointAfter) vidJointAfter.removeAttribute("src");
     if (btnScailIdle) btnScailIdle.disabled = true;
     if (btnScailAction) btnScailAction.disabled = true;
     // BG remove stays available (upload and/or session files)
@@ -707,7 +714,10 @@
     // Fresh action skeleton is plain (no overshoot): reset + enable the toggle.
     if (chkJointCarry) chkJointCarry.checked = false;
     if (secJoint && badgeJoint) unlock(secJoint, badgeJoint, "ready");
-    setJointCarryEnabled(true);
+    if (btnJointPreview) btnJointPreview.disabled = false;
+    setJointCarryEnabled(false); // carry stays disabled until first preview
+    if (vidJointBefore) vidJointBefore.src = bust("/runs/" + runId + "/action_skel.mp4");
+    if (vidJointAfter) vidJointAfter.removeAttribute("src");
     unlockScailSection();
     if (btnScailAction) {
       btnScailAction.disabled = false;
@@ -723,24 +733,39 @@
     }
   }
 
-  /** Joint spring on action skeleton (before SCAIL). */
-  async function doJointOvershoot(apply = true) {
+  function bust(url) {
+    return url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+  }
+
+  /** Render the overshot preview (non-destructive) into the right window. */
+  async function doJointPreview() {
     if (!runId) throw "No session.";
     if (!actionSkelReady) throw "Run action skeleton first.";
     setBadge(badgeAction, "running", "running");
     const fd = new FormData();
     fd.append("run_id", runId);
-    fd.append("apply", apply ? "1" : "0");
+    fd.append("mode", "preview");
     if (jointOmega) fd.append("joint_omega", jointOmega.value);
     if (jointZeta) fd.append("joint_zeta", jointZeta.value);
     if (jointSoft) fd.append("joint_soft", jointSoft.value);
     const data = await postForm("/session/joint-overshoot", fd);
-    setBadge(badgeAction, apply ? "joint ok" : "done", "done");
-    showActionSkel(data);
-    if (vidJointSkel && data.skeleton) {
-      vidJointSkel.src =
-        data.skeleton + (data.skeleton.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+    if (vidJointAfter && data.skeleton) vidJointAfter.src = bust(data.skeleton);
+    setBadge(badgeAction, "preview", "done");
+    return data;
+  }
+
+  /** Carry the previewed overshoot into SCAIL's guide, or revert to plain. */
+  async function doJointCarry(carry) {
+    if (!runId) throw "No session.";
+    const fd = new FormData();
+    fd.append("run_id", runId);
+    fd.append("mode", carry ? "carry" : "uncarry");
+    if (carry) {
+      if (jointOmega) fd.append("joint_omega", jointOmega.value);
+      if (jointZeta) fd.append("joint_zeta", jointZeta.value);
+      if (jointSoft) fd.append("joint_soft", jointSoft.value);
     }
+    const data = await postForm("/session/joint-overshoot", fd);
     actionScailReady = false;
     unlockScailSection();
     if (btnScailAction) {
@@ -1123,7 +1148,7 @@
         ").";
       if (jointChecked()) {
         statusEl.textContent = msg + " Applying joint overshoot…";
-        await doJointOvershoot();
+        await doJointCarry(true); // self-springs preview on the server
         statusEl.textContent = "Joint overshoot applied. Review skeleton, then SCAIL2.";
       } else {
         statusEl.textContent = msg + " Optional joint, then SCAIL2.";
@@ -1138,39 +1163,51 @@
   });
 
   // -- 5 Joint overshoot (optional standalone step) -----------------------
-  async function runJointCarry(apply) {
+  async function runJointPreview() {
     clearErrors();
-    setBusy(true, apply ? "Applying joint overshoot…" : "Reverting joint overshoot…");
+    setBusy(true, "Rendering overshoot preview…");
     try {
-      await doJointOvershoot(apply);
-      statusEl.textContent = apply
-        ? "Joint overshoot applied — carried into SCAIL. Re-run SCAIL2 to update character."
-        : "Joint overshoot removed (plain skeleton). Re-run SCAIL2 to update character.";
+      await doJointPreview();
+      setJointCarryEnabled(true); // enable carry once a preview exists
+      if (chkJointCarry && chkJointCarry.checked) await doJointCarry(true); // keep guide in sync
+      statusEl.textContent = "Overshoot preview ready. Check Carry into SCAIL to use it.";
     } catch (e) {
-      if (chkJointCarry) chkJointCarry.checked = !apply; // revert toggle on failure
-      fail(e);
-      setBadge(badgeAction, "error", "");
-      statusEl.textContent = "Joint overshoot toggle failed.";
-    } finally {
-      setBusy(false);
-    }
+      fail(e); setBadge(badgeAction, "error", "");
+      statusEl.textContent = "Overshoot preview failed.";
+    } finally { setBusy(false); }
   }
-  if (chkJointCarry) {
-    chkJointCarry.addEventListener("change", () => {
+  if (btnJointPreview) {
+    btnJointPreview.addEventListener("click", () => {
       if (!runId || busy) return;
-      runJointCarry(chkJointCarry.checked);
+      runJointPreview();
     });
   }
-  // Sliders: live label; re-apply on release if the overshoot is currently carried.
+  if (chkJointCarry) {
+    chkJointCarry.addEventListener("change", async () => {
+      if (!runId || busy) return;
+      const carry = chkJointCarry.checked;
+      clearErrors();
+      setBusy(true, carry ? "Carrying overshoot into SCAIL…" : "Reverting to plain skeleton…");
+      try {
+        await doJointCarry(carry);
+        statusEl.textContent = carry
+          ? "Overshoot carried into SCAIL. Re-run SCAIL2 to update character."
+          : "Reverted to plain action skeleton. Re-run SCAIL2 to update character.";
+      } catch (e) {
+        chkJointCarry.checked = !carry;
+        fail(e); setBadge(badgeAction, "error", "");
+        statusEl.textContent = "Carry toggle failed.";
+      } finally { setBusy(false); }
+    });
+  }
   function wireJointSlider(el, label, fmt) {
     if (!el) return;
-    const upd = () => {
-      if (label) label.textContent = fmt(el.value);
-    };
+    const upd = () => { if (label) label.textContent = fmt(el.value); };
     el.addEventListener("input", upd);
     el.addEventListener("change", () => {
       upd();
-      if (chkJointCarry && chkJointCarry.checked && !busy && runId) runJointCarry(true);
+      // Re-preview on release once the section is usable; runJointPreview re-carries if checked.
+      if (btnJointPreview && !btnJointPreview.disabled && !busy && runId) runJointPreview();
     });
     upd();
   }
@@ -1359,7 +1396,7 @@
         await doAction();
         if (jointChecked()) {
           statusEl.textContent = "Run all: joint overshoot on skeleton…";
-          await doJointOvershoot();
+          await doJointCarry(true); // self-springs preview on the server
         }
         statusEl.textContent = "Run all: SCAIL idle…";
         await doScail("idle");
