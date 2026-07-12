@@ -126,13 +126,41 @@ def create_session(
     }
 
 
-def stage_extract(run_id: str, *, runs_dir: Path = RUNS_DIR, n_frames: int = 90) -> dict:
+def stage_extract(
+    run_id: str,
+    *,
+    runs_dir: Path = RUNS_DIR,
+    n_frames: int = 90,
+    pose_mode: str | None = None,
+) -> dict:
     """All pose modes: HMR → hips-only constraint → static skeleton preview."""
     run_dir = Path(runs_dir) / run_id
     meta = _load_meta(run_dir)
     image = _find_image(run_dir)
-    pose_mode = meta["pose_mode"]
-    out: dict = {"run_id": run_id, "pose_mode": pose_mode, "errors": {}}
+    old_pose_mode = meta.get("pose_mode", "standing")
+    requested_pose_mode = (pose_mode or old_pose_mode or "standing").strip().lower()
+    if requested_pose_mode not in ("standing", "sitting", "lying"):
+        requested_pose_mode = (
+            old_pose_mode
+            if old_pose_mode in ("standing", "sitting", "lying")
+            else "standing"
+        )
+    pose_changed = requested_pose_mode != old_pose_mode
+    if pose_changed:
+        meta["pose_mode"] = requested_pose_mode
+        meta["extracted"] = False
+        meta["idle_done"] = False
+        meta["action_done"] = False
+        meta["idle_scail_done"] = False
+        meta["action_scail_done"] = False
+        meta["scail_done"] = False
+    pose_mode = requested_pose_mode
+    out: dict = {
+        "run_id": run_id,
+        "pose_mode": pose_mode,
+        "pose_changed": pose_changed,
+        "errors": {},
+    }
 
     constraint_path = run_dir / "constraint.json"
     try:
@@ -245,6 +273,28 @@ def _parse_idle_motion_keep(value, default: float = IDLE_MOTION_KEEP) -> float:
 
 def _parse_action_motion_keep(value, default: float = ACTION_MOTION_KEEP) -> float:
     return _parse_keep(value, default)
+
+
+def _parse_output_scale(value, default: float = 1.0) -> float:
+    try:
+        scale = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        scale = float(default)
+    return max(0.25, min(1.0, scale))
+
+
+def resolve_scail_size(image: Path, meta: dict, scale=None) -> tuple[int, int]:
+    """Output size for SCAIL video.
+
+    Explicit SCAIL scale wins over session size so skeleton motion can be
+    generated once and rendered at different final video resolutions later.
+    """
+    if scale not in (None, ""):
+        return _output_size(image, scale=_parse_output_scale(scale))
+    if meta.get("size"):
+        w, h = meta["size"]
+        return int(w), int(h)
+    return _output_size(image, scale=meta.get("scale", 1.0))
 
 
 def _load_extract_pose_and_camera(run_dir: Path):
@@ -545,6 +595,7 @@ def stage_scail(
     which: str = "both",
     runs_dir: Path = RUNS_DIR,
     client: ComfyClient | None = None,
+    scale=None,
     positive_idle: str | None = None,
     positive_action: str | None = None,
     negative: str | None = None,
@@ -599,14 +650,14 @@ def stage_scail(
 
     image = _find_image(run_dir)
     seed = meta["seed"]
-    scale = meta.get("scale", 1.0)
-    out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
+    out_w, out_h = resolve_scail_size(image, meta, scale=scale)
     pose_mode = meta["pose_mode"]
     out: dict = {
         "run_id": run_id,
         "errors": {},
         "seed": seed,
         "size": [out_w, out_h],
+        "scale": _parse_output_scale(scale, meta.get("scale", 1.0)),
         "which": which,
     }
 

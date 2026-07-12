@@ -96,6 +96,7 @@
   let actionScailReady = false;
   let busy = false;
   let imageNatural = null; // { w, h } from selected file
+  let currentRunPose = null;
 
   const POSE_HINTS = {
     standing:
@@ -110,6 +111,14 @@
   function selectedPoseMode() {
     const el = form.querySelector('input[name="pose_mode"]:checked');
     return el ? el.value : "standing";
+  }
+
+  function syncPoseFromServer(mode) {
+    if (!mode) return;
+    currentRunPose = mode;
+    const el = form.querySelector('input[name="pose_mode"][value="' + mode + '"]');
+    if (el) el.checked = true;
+    syncPoseUi();
   }
 
   function jointChecked() {
@@ -162,6 +171,9 @@
   const scaleInput = document.getElementById("output_scale");
   const scaleLabel = document.getElementById("output_scale_label");
   const sizeReadout = document.getElementById("size-readout");
+  const scailOutputScaleInput = document.getElementById("scail_output_scale");
+  const scailOutputScaleLabel = document.getElementById("scail_output_scale_label");
+  const scailSizeReadout = document.getElementById("scail-size-readout");
   const idleKeepInput = document.getElementById("idle_motion_keep");
   const idleKeepLabel = document.getElementById("idle_motion_keep_label");
   const actionKeepInput = document.getElementById("action_motion_keep");
@@ -188,6 +200,13 @@
     let d = parseFloat(actionDurInput.value);
     if (!(d > 0)) d = 2;
     return Math.max(1, Math.min(3, d));
+  }
+
+  function scailOutputScaleValue() {
+    if (!scailOutputScaleInput) return 1;
+    let s = parseFloat(scailOutputScaleInput.value);
+    if (!(s > 0)) s = 1;
+    return Math.max(0.25, Math.min(1, s));
   }
 
   function syncIdleKeepLabel() {
@@ -270,6 +289,29 @@
     syncScaleLabel();
   }
 
+  function updateScailSizeReadout() {
+    if (!scailSizeReadout) return;
+    if (!imageNatural) {
+      scailSizeReadout.textContent = "Image: —  →  Video: —";
+      return;
+    }
+    const out = computeOutputSize(imageNatural.w, imageNatural.h, scailOutputScaleValue());
+    scailSizeReadout.textContent =
+      "Image: " + imageNatural.w + "×" + imageNatural.h +
+      "  →  Video: " + out.w + "×" + out.h +
+      " (scale " + Math.round(scailOutputScaleValue() * 100) + "%)";
+  }
+  function syncScailScaleLabel() {
+    if (scailOutputScaleLabel) {
+      scailOutputScaleLabel.textContent = Math.round(scailOutputScaleValue() * 100) + "%";
+    }
+    updateScailSizeReadout();
+  }
+  if (scailOutputScaleInput) {
+    scailOutputScaleInput.addEventListener("input", syncScailScaleLabel);
+    syncScailScaleLabel();
+  }
+
   // -- image picker -------------------------------------------------------
   dropZone.addEventListener("click", () => imageInput.click());
   dropZone.addEventListener("dragover", (e) => {
@@ -299,6 +341,7 @@
         h: dropZonePreview.naturalHeight,
       };
       updateSizeReadout();
+      updateScailSizeReadout();
     };
     dropZonePreview.src = url;
     dropZonePreview.style.display = "block";
@@ -643,7 +686,12 @@
     setBadge(badgeExtract, "running", "running");
     const fd = new FormData();
     fd.append("run_id", runId);
+    // Send the currently selected pose so re-extract honors sitting/lying
+    // instead of falling back to the session's original (often standing) pose.
+    fd.append("pose_mode", selectedPoseMode());
     const data = await postForm("/session/extract", fd);
+    if (data.pose_mode) syncPoseFromServer(data.pose_mode);
+    if (data.pose_changed) resetDownstreamUi();
     if (data.skipped) {
       setBadge(badgeExtract, "skipped", "done");
     } else {
@@ -815,8 +863,9 @@
     }
   }
 
-  /** @param {"idle"|"action"|"both"} which */
-  async function doScail(which) {
+  /** @param {"idle"|"action"|"both"} which
+   *  @param {number} [scale] explicit SCAIL output scale (step-by-step only) */
+  async function doScail(which, scale) {
     if (!runId) throw "No session.";
     which = which || "both";
     if (which === "idle" && !idleSkelReady) throw "Run idle skeleton first.";
@@ -834,6 +883,9 @@
     fd.append("run_id", runId);
     fd.append("which", which);
     appendScailPrompts(fd);
+    // Step-by-step passes an explicit SCAIL output scale; Run all omits it so the
+    // backend falls back to the session size (Run all resolution stays unchanged).
+    if (scale != null) fd.append("scale", String(scale));
     const data = await postForm("/session/scail", fd);
 
     if (which === "idle" || which === "both") {
@@ -1242,7 +1294,7 @@
       clearErrors();
       setBusy(true, "SCAIL2 idle: drive character with idle guide…");
       try {
-        await doScail("idle");
+        await doScail("idle", scailOutputScaleValue());
         statusEl.textContent = "SCAIL idle done. Action SCAIL can run when action skeleton is ready.";
       } catch (e) {
         fail(e);
@@ -1259,7 +1311,7 @@
       clearErrors();
       setBusy(true, "SCAIL2 action: drive character with action guide…");
       try {
-        await doScail("action");
+        await doScail("action", scailOutputScaleValue());
         statusEl.textContent =
           "SCAIL action done. Next: step 7 bg remove, then optional time overshoot.";
       } catch (e) {

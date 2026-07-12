@@ -284,7 +284,11 @@ class Handler(BaseHTTPRequestHandler):
             if not run_id or not (RUNS_DIR / run_id).is_dir():
                 self._send_json(400, {"error": "invalid run_id"})
                 return
-            result = stage_extract(run_id, runs_dir=RUNS_DIR)
+            result = stage_extract(
+                run_id,
+                pose_mode=form.getvalue("pose_mode", "") or None,
+                runs_dir=RUNS_DIR,
+            )
             status = 200 if not result.get("errors") else 500
             self._send_json(status, result)
         except Exception as exc:
@@ -400,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
                 which=which,
                 runs_dir=RUNS_DIR,
                 client=client,
+                scale=form.getvalue("scale", "") or None,
                 positive_idle=form.getvalue("scail_idle_positive") or None,
                 positive_action=form.getvalue("scail_action_positive") or None,
                 negative=form.getvalue("scail_negative") or None,

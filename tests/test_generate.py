@@ -21,6 +21,7 @@ from pipeline.generate import (
     build_scail_positive,
     _output_size,
 )
+from pipeline.stages import resolve_scail_size
 
 
 def test_plan_steps_selects_overshoot():
@@ -190,3 +191,12 @@ def test_output_size_keeps_aspect_and_scale(tmp_path):
     assert abs(w1 / h1 - 0.5) < 0.05
     assert w2 <= w1 and h2 <= h1
     assert abs(w2 / h2 - w1 / h1) < 0.05
+
+
+def test_scail_size_explicit_scale_overrides_session_size(tmp_path):
+    img = Path(tmp_path) / "portrait.png"
+    Image.new("RGB", (1000, 2000), (0, 0, 0)).save(img)
+    meta = {"scale": 0.25, "size": [160, 320]}
+
+    assert resolve_scail_size(img, meta, scale=1.0) == (640, 1280)
+    assert resolve_scail_size(img, meta, scale=0.5) == (320, 640)

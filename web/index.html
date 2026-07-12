@@ -540,6 +540,12 @@
           Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
           Next: step 7 bg remove, then optional time overshoot.
         </p>
+        <div id="scail-scale-slot">
+          <label for="scail_output_scale">SCAIL output scale <span id="scail_output_scale_label">100%</span></label>
+          <input type="range" id="scail_output_scale" min="0.25" max="1" step="0.05" value="1">
+          <p class="pose-hint">Only affects Step by step SCAIL result video size; skeleton motion can be reused.</p>
+          <p class="size-readout" id="scail-size-readout">Image: &mdash;&nbsp;&rarr;&nbsp; Video: &mdash;</p>
+        </div>
         <div>
           <label for="scail_idle_positive">SCAIL idle positive</label>
           <textarea id="scail_idle_positive" name="scail_idle_positive" rows="5"
