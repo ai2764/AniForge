@@ -535,7 +535,8 @@ def align_motion_to_base_pose(
 def sanitize_action(prompt):
     """Drop turning/turn words from an action prompt (fixed-frame rendering
     means a body-turn description would fight the camera-locked guide).
-    Also soft-strips speech verbs so SCAIL is less likely to animate a talking mouth."""
+    Also soft-strips speech verbs. Kimodo drives a jawless skeleton, so mouth
+    constraints belong to the later SCAIL rendering prompt, not this motion text."""
     p = re.sub(r"\b(turning|turns|turn)\b", "", prompt or "", flags=re.I)
     p = re.sub(
         r"\b(talking|talks|talk|speaking|speaks|speak|saying|says|said|"
@@ -545,7 +546,7 @@ def sanitize_action(prompt):
         flags=re.I,
     )
     p = re.sub(r"\s{2,}", " ", p).strip(" ,.")
-    return ensure_mouth_still(p)
+    return p
 
 
 def align_4k1(n):

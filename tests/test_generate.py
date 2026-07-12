@@ -35,13 +35,14 @@ def test_sanitize_drops_turning():
     assert "turn" not in sanitize_action("she turns and waves").lower()
 
 
-def test_sanitize_blocks_talking_and_keeps_mouth_still():
+def test_sanitize_blocks_talking_without_adding_mouth_instructions():
     p = sanitize_action("she waves and talks loudly")
-    # user speech verbs stripped; anti-speech clause remains
+    # Kimodo drives a jawless skeleton, so only retain the body action.
     assert "talks" not in p.lower()
     assert "waves" in p.lower()
-    assert "mouth closed" in p.lower()
-    assert "no talking" in p.lower()
+    assert "mouth" not in p.lower()
+    assert "lips" not in p.lower()
+    assert "no talking" not in p.lower()
 
 
 def test_ensure_mouth_still_idempotent():

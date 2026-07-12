@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from server.app import parse_generate_form, required_nodes_present
 
 
@@ -33,3 +35,12 @@ def test_parse_form_scale():
 def test_required_nodes_check():
     assert required_nodes_present({"Kimodo_Sampler": {}, "WanSCAILToVideo": {}})
     assert not required_nodes_present({"Kimodo_Sampler": {}})
+
+
+def test_bgremove_model_control_is_hidden_with_default_preserved():
+    html = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert '<div id="bgremove-model-control" hidden>' in html
+    assert '<select id="bgremove_model"' in html
+    assert '<option value="RMBG-2.0 HQ" selected>' in html
