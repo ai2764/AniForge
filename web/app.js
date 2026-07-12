@@ -91,6 +91,7 @@
   let hasAction = false;
   let idleSkelReady = false;
   let actionSkelReady = false;
+  let jointPreviewed = false; // true once a joint-overshoot preview exists this action
   let idleScailReady = false;
   let actionScailReady = false;
   let busy = false;
@@ -387,8 +388,8 @@
     btnIdle.disabled = on || !runId || secIdle.classList.contains("locked");
     btnAction.disabled = on || !runId || secAction.classList.contains("locked");
     if (btnJointPreview) btnJointPreview.disabled = on || !runId || !actionSkelReady;
-    // carry enable is managed by preview success; just re-disable while busy
-    if (chkJointCarry && on) chkJointCarry.disabled = true;
+    // Carry is usable only after a preview exists; derive it (also dims the label).
+    setJointCarryEnabled(!on && jointPreviewed);
     if (btnScailIdle) {
       btnScailIdle.disabled = on || !runId || !idleSkelReady;
     }
@@ -498,6 +499,7 @@
     }
     lock(secPlay, badgePlay, "locked");
     if (chkJointCarry) chkJointCarry.checked = false;
+    jointPreviewed = false;
     setJointCarryEnabled(false);
     if (secJoint && badgeJoint) lock(secJoint, badgeJoint, "locked");
     if (btnJointPreview) btnJointPreview.disabled = true;
@@ -713,6 +715,7 @@
     if (scailActionPositiveEl) scailActionPositiveEl.value = actionPrompt;
     // Fresh action skeleton is plain (no overshoot): reset + enable the toggle.
     if (chkJointCarry) chkJointCarry.checked = false;
+    jointPreviewed = false; // new plain skeleton — require a fresh preview before carry
     if (secJoint && badgeJoint) unlock(secJoint, badgeJoint, "ready");
     if (btnJointPreview) btnJointPreview.disabled = false;
     setJointCarryEnabled(false); // carry stays disabled until first preview
@@ -1168,6 +1171,7 @@
     setBusy(true, "Rendering overshoot preview…");
     try {
       await doJointPreview();
+      jointPreviewed = true;
       setJointCarryEnabled(true); // enable carry once a preview exists
       if (chkJointCarry && chkJointCarry.checked) await doJointCarry(true); // keep guide in sync
       statusEl.textContent = "Overshoot preview ready. Check Carry into SCAIL to use it.";
