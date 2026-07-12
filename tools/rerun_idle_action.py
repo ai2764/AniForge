@@ -79,7 +79,7 @@ def main() -> int:
 
         if not args.no_joint:
             log(logf, "--- joint ---")
-            r = stage_joint_overshoot(run_id)
+            r = stage_joint_overshoot(run_id, mode="carry")
             if r.get("errors"):
                 log(logf, f"FAIL joint: {r['errors']}")
                 return 1

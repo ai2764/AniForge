@@ -117,7 +117,7 @@ def main() -> int:
         ),
     ):
         return 5
-    if not check("joint", stage_joint_overshoot(run_id)):
+    if not check("joint", stage_joint_overshoot(run_id, mode="carry")):
         return 6
 
     free(client, 8.0)

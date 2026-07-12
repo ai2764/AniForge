@@ -153,7 +153,7 @@ def run_one(slug: str, image: Path, action: str) -> int:
     ):
         return 5
     # Light joint spring only (full spring can look broken on short gestures).
-    if not check(logf, "joint", stage_joint_overshoot(run_id)):
+    if not check(logf, "joint", stage_joint_overshoot(run_id, mode="carry")):
         return 6
 
     free(logf, client, 8.0)
