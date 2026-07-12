@@ -34,7 +34,7 @@ def build_scail_graph(template, guide_name, ref_name, width, height, length,
 
 
 def drive_character(client: ComfyClient, guide_mp4: Path, ref_image: Path, out_mp4: Path, *,
-                     width=480, height=832, length, pose_strength=0.9, seed=42, steps=10,
+                     width=480, height=832, length, pose_strength=1.0, seed=42, steps=10,
                      cfg=3.0, prefix="mp_body", positive, negative=None,
                      comfy_input: Path | None = None,
                      template_path=ASSET_TEMPLATE) -> Path:

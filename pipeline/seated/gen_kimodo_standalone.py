@@ -54,6 +54,30 @@ from kimodo.tools import seed_everything
 from kimodo.model.kimodo_model import sanitize_texts
 
 
+def _clamp_constraint_json(cjson_path: str, n_frames: int) -> str:
+    """Truncate a constraint's per-frame arrays to the generated clip length.
+
+    Kimodo indexes ``m_sliced[frame_indices]`` against a tensor of length ``nf``;
+    if the constraint has more frames than the clip (e.g. a 90-frame extract pin
+    used for a 60-frame idle) it triggers a CUDA "index out of bounds" assert. The
+    pins are static (same pose every frame), so truncating to ``n_frames`` is
+    equivalent and safe. Returns the original path when no truncation is needed.
+    """
+    raw = json.loads(Path(cjson_path).read_text(encoding="utf-8"))
+    changed = False
+    for c in raw:
+        for key in ("frame_indices", "local_joints_rot", "root_positions"):
+            v = c.get(key)
+            if isinstance(v, list) and len(v) > n_frames:
+                c[key] = v[:n_frames]
+                changed = True
+    if not changed:
+        return cjson_path
+    out = Path(cjson_path).with_name(Path(cjson_path).stem + f"_n{n_frames}.json")
+    out.write_text(json.dumps(raw), encoding="utf-8")
+    return str(out)
+
+
 def _legacy_job():
     cjson = sys.argv[1]
     idle_prefix = sys.argv[2] if len(sys.argv) > 2 else "kimodo_saidle"
@@ -129,7 +153,10 @@ for item in JOBS:
     seed_everything(clip_seed)
     texts = sanitize_texts([prompt])
     nf = [int(DUR * model.fps)] * len(texts)
-    cons = load_constraints_lst(CJSON, model.skeleton) if CJSON else []
+    cons = (
+        load_constraints_lst(_clamp_constraint_json(CJSON, nf[0]), model.skeleton)
+        if CJSON else []
+    )
     t1 = time.time()
     out = model(
         texts, nf,
