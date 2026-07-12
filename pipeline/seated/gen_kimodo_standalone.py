@@ -23,6 +23,14 @@ import subprocess
 from pathlib import Path
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+# Point the HF hub cache at a fast local dir for THIS Kimodo subprocess only, so
+# the LLM2Vec text encoder (~15GB) + Kimodo weights load off a fast drive instead
+# of the shared archive. Scoped here (before any HF import) so bgremove/HMR/other
+# projects keep using the default cache. No-op if the env var is unset.
+_kim_hf = os.environ.get("KIMODO_HF_HUB_CACHE")
+if _kim_hf:
+    os.environ["HF_HUB_CACHE"] = _kim_hf
+    os.environ["HUGGINGFACE_HUB_CACHE"] = _kim_hf
 _REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO))
 from pipeline.paths import comfy_output_dir, kimodo_package_dir
