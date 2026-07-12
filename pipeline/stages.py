@@ -30,6 +30,7 @@ from pipeline.generate import (
     dampen_idle_joints,
     prepare_idle_source_motion,
     plan_steps,
+    lower_body_action_requested,
     sanitize_action,
     shape_live2d_idle,
 )
@@ -46,6 +47,7 @@ from pipeline.spring_time_remap import time_remap_file
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = REPO_ROOT / "runs"
 META_NAME = "meta.json"
+POSE_MODES = ("standing", "sitting", "lying")
 
 
 def _load_meta(run_dir: Path) -> dict:
@@ -59,10 +61,22 @@ def _save_meta(run_dir: Path, meta: dict) -> None:
     (run_dir / META_NAME).write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
+def _normalize_pose_mode(value: str | None, default: str = "standing") -> str:
+    mode = (value or default or "standing").strip().lower()
+    if mode not in POSE_MODES:
+        fallback = (default or "standing").strip().lower()
+        return fallback if fallback in POSE_MODES else "standing"
+    return mode
+
+
 def _rel_url(path: Path | None) -> str | None:
     if path is None or not Path(path).is_file():
         return None
-    rel = Path(path).resolve().relative_to(REPO_ROOT.resolve())
+    resolved = Path(path).resolve()
+    try:
+        rel = resolved.relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        return str(resolved)
     return "/" + rel.as_posix()
 
 
@@ -82,9 +96,7 @@ def create_session(
     scale: float = 1.0,
     runs_dir: Path = RUNS_DIR,
 ) -> dict:
-    pose_mode = (pose_mode or "standing").strip().lower()
-    if pose_mode not in ("standing", "sitting", "lying"):
-        pose_mode = "standing"
+    pose_mode = _normalize_pose_mode(pose_mode)
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
     try:
@@ -283,6 +295,28 @@ def _parse_output_scale(value, default: float = 1.0) -> float:
     return max(0.25, min(1.0, scale))
 
 
+def _parse_pose_strength(value, default: float = 1.0) -> float:
+    """SCAIL pose-guide strength (how strongly the skeleton constrains the video).
+
+    Default 1.0 matches the official SCAIL2 workflow / Camera Lab (fully follow
+    the skeleton, so a single raised hand stays single).
+    """
+    try:
+        v = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        v = float(default)
+    return max(0.0, min(1.0, v))
+
+
+def _parse_cfg(value, default: float = 3.0) -> float:
+    """SCAIL classifier-free guidance (how strongly the prompts steer the video)."""
+    try:
+        v = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        v = float(default)
+    return max(1.0, min(10.0, v))
+
+
 def resolve_scail_size(image: Path, meta: dict, scale=None) -> tuple[int, int]:
     """Output size for SCAIL video.
 
@@ -434,6 +468,7 @@ def stage_action(
     run_id: str,
     *,
     action_prompt: str,
+    pose_mode: str | None = None,
     action_motion_keep: float | None = None,
     action_duration: float | None = None,
     runs_dir: Path = RUNS_DIR,
@@ -447,6 +482,7 @@ def stage_action(
     if not (action_prompt or "").strip():
         return {"run_id": run_id, "errors": {"action": "action_prompt is required"}}
     action_text = sanitize_action(action_prompt)
+    lower_pose = lower_body_action_requested(action_text)
     keep = _parse_action_motion_keep(
         action_motion_keep if action_motion_keep is not None else meta.get("action_motion_keep"),
         default=ACTION_MOTION_KEEP,
@@ -461,15 +497,18 @@ def stage_action(
     image = _find_image(run_dir)
     seed = meta["seed"]
     scale = meta.get("scale", 1.0)
-    pose_mode = meta.get("pose_mode", "standing")
+    session_pose_mode = _normalize_pose_mode(meta.get("pose_mode"))
+    action_pose_mode = _normalize_pose_mode(pose_mode, default=session_pose_mode)
     out_w, out_h = meta.get("size") or _output_size(image, scale=scale)
     out: dict = {
         "run_id": run_id,
         "errors": {},
         "seed": seed,
-        "pose_mode": pose_mode,
+        "pose_mode": action_pose_mode,
+        "session_pose_mode": session_pose_mode,
         "action_motion_keep": keep,
         "action_duration": duration,
+        "preserve_lower_pose": action_pose_mode == "standing" and lower_pose,
         "extract_pose_strength": 1.0,
     }
 
@@ -479,7 +518,7 @@ def stage_action(
             seed=seed,
             name="action",
             prompt=action_text,
-            pose_mode=pose_mode,
+            pose_mode=action_pose_mode,
             duration=duration,
         )
         job_path = run_dir / "kimodo_job_action.json"
@@ -503,13 +542,14 @@ def stage_action(
             return out
         # Sitting/lying: free Kimodo then lock lower body; boost weak upper motion
         # so keep=100% is clearly different from idle micro-motion.
-        lock_lower = pose_mode in ("sitting", "lying")
+        lock_lower = action_pose_mode in ("sitting", "lying")
         f0_err_before = float(np.linalg.norm(P_raw[0] - base, axis=-1).mean())
         P = align_motion_to_base_pose(
             P_raw,
             base,
             keep=keep,
             lock_lower_body=lock_lower,
+            preserve_lower_pose=action_pose_mode == "standing" and lower_pose,
             boost_upper=True,
         )
         f0_err = float(np.linalg.norm(P[0] - base, axis=-1).mean())
@@ -570,6 +610,8 @@ def stage_action(
     meta["action_done"] = True
     meta["step"] = "action_skel"
     meta["action_prompt"] = action_text
+    meta["action_pose_mode"] = action_pose_mode
+    meta["action_preserve_lower_pose"] = action_pose_mode == "standing" and lower_pose
     meta["action_motion_keep"] = keep
     meta["action_duration"] = duration
     meta["action_anchored_to_extract"] = True
@@ -596,6 +638,8 @@ def stage_scail(
     runs_dir: Path = RUNS_DIR,
     client: ComfyClient | None = None,
     scale=None,
+    pose_strength=None,
+    cfg=None,
     positive_idle: str | None = None,
     positive_action: str | None = None,
     negative: str | None = None,
@@ -660,6 +704,10 @@ def stage_scail(
         "scale": _parse_output_scale(scale, meta.get("scale", 1.0)),
         "which": which,
     }
+    ps = _parse_pose_strength(pose_strength)
+    cf = _parse_cfg(cfg)
+    out["pose_strength"] = ps
+    out["cfg"] = cf
 
     if client is None:
         client = ComfyClient()
@@ -691,6 +739,7 @@ def stage_scail(
                 client, guide, image, run_dir / f"{label}.mp4",
                 length=align_4k1(n_frames), width=out_w, height=out_h,
                 prefix=f"mp_{pose_mode}_{label}", seed=seed,
+                pose_strength=ps, cfg=cf,
                 positive=positive,
                 negative=neg,
             )
@@ -784,7 +833,10 @@ def stage_joint_overshoot(
             zeta=JOINT_SPRING["zeta"] if zeta is None else float(zeta),
             soft_scale=JOINT_SPRING["soft"] if soft is None else float(soft),
         )
-        pose_mode = meta.get("pose_mode", "standing")
+        pose_mode = _normalize_pose_mode(
+            meta.get("action_pose_mode"),
+            default=meta.get("pose_mode", "standing"),
+        )
         base, cam, _src = _load_action_base_pose(run_dir, seed)
         if base is not None:
             P = align_motion_to_base_pose(

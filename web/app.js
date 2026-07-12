@@ -113,11 +113,23 @@
     return el ? el.value : "standing";
   }
 
+  function selectedActionPoseMode() {
+    const el = document.querySelector('input[name="action_pose_mode"]:checked');
+    return el ? el.value : currentRunPose || selectedPoseMode();
+  }
+
+  function syncActionPoseMode(mode) {
+    if (!mode) return;
+    const el = document.querySelector('input[name="action_pose_mode"][value="' + mode + '"]');
+    if (el) el.checked = true;
+  }
+
   function syncPoseFromServer(mode) {
     if (!mode) return;
     currentRunPose = mode;
     const el = form.querySelector('input[name="pose_mode"][value="' + mode + '"]');
     if (el) el.checked = true;
+    syncActionPoseMode(mode);
     syncPoseUi();
   }
 
@@ -164,7 +176,10 @@
   }
 
   form.querySelectorAll('input[name="pose_mode"]').forEach((el) => {
-    el.addEventListener("change", syncPoseUi);
+    el.addEventListener("change", () => {
+      syncPoseUi();
+      if (!runId) syncActionPoseMode(selectedPoseMode());
+    });
   });
   syncPoseUi();
 
@@ -174,6 +189,10 @@
   const scailOutputScaleInput = document.getElementById("scail_output_scale");
   const scailOutputScaleLabel = document.getElementById("scail_output_scale_label");
   const scailSizeReadout = document.getElementById("scail-size-readout");
+  const scailPoseStrengthInput = document.getElementById("scail_pose_strength");
+  const scailPoseStrengthLabel = document.getElementById("scail_pose_strength_label");
+  const scailCfgInput = document.getElementById("scail_cfg");
+  const scailCfgLabel = document.getElementById("scail_cfg_label");
   const idleKeepInput = document.getElementById("idle_motion_keep");
   const idleKeepLabel = document.getElementById("idle_motion_keep_label");
   const actionKeepInput = document.getElementById("action_motion_keep");
@@ -207,6 +226,18 @@
     let s = parseFloat(scailOutputScaleInput.value);
     if (!(s > 0)) s = 1;
     return Math.max(0.25, Math.min(1, s));
+  }
+  function scailPoseStrengthValue() {
+    if (!scailPoseStrengthInput) return 1;
+    let s = parseFloat(scailPoseStrengthInput.value);
+    if (!(s >= 0)) s = 1;
+    return Math.max(0, Math.min(1, s));
+  }
+  function scailCfgValue() {
+    if (!scailCfgInput) return 3;
+    let s = parseFloat(scailCfgInput.value);
+    if (!(s >= 1)) s = 3;
+    return Math.max(1, Math.min(10, s));
   }
 
   function syncIdleKeepLabel() {
@@ -311,6 +342,13 @@
     scailOutputScaleInput.addEventListener("input", syncScailScaleLabel);
     syncScailScaleLabel();
   }
+  function syncScailParamLabels() {
+    if (scailPoseStrengthLabel) scailPoseStrengthLabel.textContent = scailPoseStrengthValue().toFixed(2);
+    if (scailCfgLabel) scailCfgLabel.textContent = scailCfgValue().toFixed(1);
+  }
+  if (scailPoseStrengthInput) scailPoseStrengthInput.addEventListener("input", syncScailParamLabels);
+  if (scailCfgInput) scailCfgInput.addEventListener("input", syncScailParamLabels);
+  syncScailParamLabels();
 
   // -- image picker -------------------------------------------------------
   dropZone.addEventListener("click", () => imageInput.click());
@@ -670,6 +708,7 @@
 
     const data = await postForm("/session", fd);
     runId = data.run_id;
+    if (data.pose_mode) syncActionPoseMode(data.pose_mode);
     if (data.seed !== undefined && data.seed !== null) {
       document.getElementById("seed").value = data.seed;
     }
@@ -752,6 +791,7 @@
     const fd = new FormData();
     fd.append("run_id", runId);
     fd.append("action_prompt", actionPrompt);
+    fd.append("action_pose_mode", selectedActionPoseMode());
     fd.append("action_motion_keep", String(actionMotionKeepValue()));
     fd.append("action_duration", String(actionDurationValue()));
     const data = await postForm("/session/action", fd);
@@ -864,8 +904,9 @@
   }
 
   /** @param {"idle"|"action"|"both"} which
-   *  @param {number} [scale] explicit SCAIL output scale (step-by-step only) */
-  async function doScail(which, scale) {
+   *  @param {{scale?:number, poseStrength?:number, cfg?:number}} [opts]
+   *    step-by-step overrides; Run all omits them so the backend uses defaults */
+  async function doScail(which, opts = {}) {
     if (!runId) throw "No session.";
     which = which || "both";
     if (which === "idle" && !idleSkelReady) throw "Run idle skeleton first.";
@@ -883,9 +924,11 @@
     fd.append("run_id", runId);
     fd.append("which", which);
     appendScailPrompts(fd);
-    // Step-by-step passes an explicit SCAIL output scale; Run all omits it so the
-    // backend falls back to the session size (Run all resolution stays unchanged).
-    if (scale != null) fd.append("scale", String(scale));
+    // Step-by-step passes explicit overrides; Run all omits them so the backend
+    // uses its defaults (Run all resolution / fidelity stay unchanged).
+    if (opts.scale != null) fd.append("scale", String(opts.scale));
+    if (opts.poseStrength != null) fd.append("pose_strength", String(opts.poseStrength));
+    if (opts.cfg != null) fd.append("cfg", String(opts.cfg));
     const data = await postForm("/session/scail", fd);
 
     if (which === "idle" || which === "both") {
@@ -1294,7 +1337,7 @@
       clearErrors();
       setBusy(true, "SCAIL2 idle: drive character with idle guide…");
       try {
-        await doScail("idle", scailOutputScaleValue());
+        await doScail("idle", { scale: scailOutputScaleValue(), poseStrength: scailPoseStrengthValue(), cfg: scailCfgValue() });
         statusEl.textContent = "SCAIL idle done. Action SCAIL can run when action skeleton is ready.";
       } catch (e) {
         fail(e);
@@ -1311,7 +1354,7 @@
       clearErrors();
       setBusy(true, "SCAIL2 action: drive character with action guide…");
       try {
-        await doScail("action", scailOutputScaleValue());
+        await doScail("action", { scale: scailOutputScaleValue(), poseStrength: scailPoseStrengthValue(), cfg: scailCfgValue() });
         statusEl.textContent =
           "SCAIL action done. Next: step 7 bg remove, then optional time overshoot.";
       } catch (e) {
@@ -1400,6 +1443,12 @@
     if (tabBtnSteps) tabBtnSteps.setAttribute("aria-selected", isRun ? "false" : "true");
     if (tabPanelRunall) tabPanelRunall.classList.toggle("active", isRun);
     if (tabPanelSteps) tabPanelSteps.classList.toggle("active", !isRun);
+    // Global pose and output scale are Run-all controls. Step by step keeps
+    // action pose local to Step 4 and sets size at the SCAIL step.
+    const globalPoseSlot = document.getElementById("global-pose-slot");
+    if (globalPoseSlot) globalPoseSlot.style.display = isRun ? "" : "none";
+    const globalScaleSlot = document.getElementById("global-scale-slot");
+    if (globalScaleSlot) globalScaleSlot.style.display = isRun ? "" : "none";
   }
 
   function syncActionPrompt(from, to) {

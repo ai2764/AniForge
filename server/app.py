@@ -345,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
             result = stage_action(
                 run_id,
                 action_prompt=form.getvalue("action_prompt", ""),
+                pose_mode=form.getvalue("action_pose_mode", "") or None,
                 action_motion_keep=action_keep,
                 action_duration=action_dur,
                 runs_dir=RUNS_DIR,
@@ -405,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                 runs_dir=RUNS_DIR,
                 client=client,
                 scale=form.getvalue("scale", "") or None,
+                pose_strength=form.getvalue("pose_strength", "") or None,
+                cfg=form.getvalue("cfg", "") or None,
                 positive_idle=form.getvalue("scail_idle_positive") or None,
                 positive_action=form.getvalue("scail_action_positive") or None,
                 negative=form.getvalue("scail_negative") or None,

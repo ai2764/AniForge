@@ -359,6 +359,19 @@ SMPLX22_UPPER_BODY = tuple(
 # also stick knees/ankles/feet if legs flail out of the seated/lying pose.
 SMPLX22_HIPS_ONLY = (0,)
 
+LOWER_BODY_ACTION_RE = re.compile(
+    r"\b("
+    r"leg|legs|foot|feet|ankle|ankles|knee|knees|"
+    r"step|steps|stepping|walk|walking|kick|kicking|"
+    r"jump|jumping|crouch|crouching|squat|squatting"
+    r")\b",
+    re.I,
+)
+
+
+def lower_body_action_requested(prompt: str | None) -> bool:
+    return bool(LOWER_BODY_ACTION_RE.search(prompt or ""))
+
 
 def align_motion_to_base_pose(
     posed_joints,
@@ -366,6 +379,7 @@ def align_motion_to_base_pose(
     keep: float = 1.0,
     *,
     lock_lower_body: bool = False,
+    preserve_lower_pose: bool = False,
     boost_upper: bool = False,
     upper_ref_std: float = ACTION_UPPER_REF_STD,
 ):
@@ -377,6 +391,8 @@ def align_motion_to_base_pose(
     keep=1: full action deltas. keep=0: frozen base.
     lock_lower_body: pin only the pelvis root to base every frame (sitting/lying),
     leaving legs and feet free.
+    preserve_lower_pose: for standing lower-body actions, preserve Kimodo's
+    lower-body pose relative to its pelvis instead of only applying frame deltas.
     boost_upper: if upper-body residual is tiny, amplify toward upper_ref_std
     so keep=100% is visibly different from idle.
     """
@@ -425,6 +441,19 @@ def align_motion_to_base_pose(
             elif up_std < target:
                 scale = min(target / up_std, 12.0)
                 out[:, upper, :] = out[0:1, upper, :] + up_res * scale
+
+    if preserve_lower_pose and not lock_lower_body and out.shape[0] >= 2:
+        lower = [j for j in SMPLX22_LOWER_BODY if j != 0 and j < out.shape[1]]
+        if lower and P.shape[1] > 0:
+            target = out[:, 0:1, :] + (P[:, lower, :] - P[:, 0:1, :])
+            alpha = np.linspace(0.0, 1.0, out.shape[0], dtype=np.float64)
+            # Ease in so frame 0 remains exactly the approved extract pose.
+            alpha = 0.5 - 0.5 * np.cos(np.pi * alpha)
+            out[:, lower, :] = (
+                (1.0 - alpha[:, None, None]) * out[:, lower, :]
+                + alpha[:, None, None] * target
+            )
+            out[0] = base
 
     # Apply amount slider on residual from base (frame 0 stays base).
     if k < 1.0:

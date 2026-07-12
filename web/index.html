@@ -304,7 +304,7 @@
       <input type="file" id="image-input" name="image" accept="image/*" style="display:none">
     </div>
 
-    <div>
+    <div id="global-pose-slot">
       <label>Pose mode</label>
       <div class="pose-toggle" role="radiogroup" aria-label="Pose mode">
         <label><input type="radio" name="pose_mode" value="standing" checked> Standing</label>
@@ -314,10 +314,15 @@
       <p class="pose-hint" id="pose-hint">Standing: extract still from image; Kimodo idle/action free (no pin) so prompts differ.</p>
     </div>
 
-    <div>
-      <label for="output_scale">Output scale <span id="output_scale_label">100%</span></label>
+    <div id="global-scale-slot">
+      <div class="label-with-info">
+        <label for="output_scale">Output scale <span id="output_scale_label">100%</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About output scale">
+          i
+          <span class="info-bubble">Run all output size — same aspect as the image; 100% = max (~720p-class long side). In Step by step the size is set at the SCAIL step instead.</span>
+        </span>
+      </div>
       <input type="range" id="output_scale" name="scale" min="0.25" max="1" step="0.05" value="1">
-      <p class="pose-hint">Same aspect ratio as the image. 100% = max (~720p-class long side).</p>
       <p class="size-readout" id="size-readout">Image: — &nbsp;→&nbsp; Video: —</p>
     </div>
 
@@ -364,14 +369,11 @@
   <!-- Step: extract skeleton -->
   <section class="section locked" id="sec-extract" data-step="extract">
     <div class="section-head">
-      <h2>2. Extract pose</h2>
+      <h2>2. Extract pose <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble"><span id="extract-hint">HMR pose from the image, pin pelvis (limbs free). Review skeleton before Idle.</span></span></span></h2>
       <span class="badge" id="badge-extract">locked</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint" id="extract-hint">
-          HMR pose from the image, pin pelvis (limbs free). Review skeleton before Idle.
-        </p>
         <button type="button" id="btn-extract" disabled>Start extract</button>
       </div>
       <div class="preview-col">
@@ -386,7 +388,7 @@
   <!-- Step: idle skeleton motion -->
   <section class="section locked" id="sec-idle" data-step="idle">
     <div class="section-head">
-      <h2>3. Idle skeleton motion</h2>
+      <h2>3. Idle skeleton motion <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">Live2D-style: ~2s loop, torso+head micro-motion, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</span></span></h2>
       <span class="badge" id="badge-idle">locked</span>
     </div>
     <div class="step-body">
@@ -395,7 +397,6 @@
           <label for="idle_prompt">Idle prompt</label>
           <input type="text" id="idle_prompt" name="idle_prompt"
             value="A calm, continuously moving idle loop. Soft steady breathing lifts and lowers the chest and upper belly every cycle; the torso and spine gently sway and lean a little with the breath, and the shoulders rise and ease each time. The head makes small natural nods and slow side-to-side sways so the body never looks frozen. Keep every movement gentle, subtle, and continuous, with no large joint rotations, returning smoothly to a seamless loop.">
-          <p class="pose-hint">Live2D-style: ~2s loop, torso+head micro-motion, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
         </div>
         <div>
           <div class="label-with-info">
@@ -430,17 +431,25 @@
   <!-- Step: action skeleton motion (looping video, same as idle) -->
   <section class="section locked" id="sec-action" data-step="action">
     <div class="section-head">
-      <h2>4. Action skeleton motion</h2>
+      <h2>4. Action skeleton motion <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size. Action prompt is on the <strong>Run all</strong> tab (synced).</span></span></h2>
       <span class="badge" id="badge-action">locked</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size. Action prompt is on the <strong>Run all</strong> tab (synced).</p>
         <div>
           <label for="action_prompt_steps">Action prompt</label>
           <textarea id="action_prompt_steps" name="action_prompt_steps" rows="3"
             placeholder="Same as Run all tab — e.g. wave hello with one hand"></textarea>
           <p class="pose-hint">Synced with Run all → Action prompt.</p>
+        </div>
+        <div>
+          <label>Action pose mode</label>
+          <div class="pose-toggle" role="radiogroup" aria-label="Action pose mode">
+            <label><input type="radio" name="action_pose_mode" value="standing" checked> Standing</label>
+            <label><input type="radio" name="action_pose_mode" value="sitting"> Sitting</label>
+            <label><input type="radio" name="action_pose_mode" value="lying"> Lying</label>
+          </div>
+          <p class="pose-hint">Step 4 only. Does not change the session pose mode or Run all.</p>
         </div>
         <div>
           <div class="label-with-info">
@@ -490,12 +499,11 @@
   <!-- Step: joint overshoot (optional, standalone) -->
   <section class="section locked" id="sec-joint" data-step="joint">
     <div class="section-head">
-      <h2>5. Joint overshoot (optional)</h2>
+      <h2>5. Joint overshoot (optional) <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">Springy follow-through on the action skeleton. Set the spring, click <strong>Preview</strong> to render it (non-destructive), compare against the original, then <strong>Carry into SCAIL</strong> to make SCAIL use the overshot version.</span></span></h2>
       <span class="badge" id="badge-joint">locked</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">Springy follow-through on the action skeleton. Set the spring, click <strong>Preview</strong> to render it (non-destructive), compare against the original, then <strong>Carry into SCAIL</strong> to make SCAIL use the overshot version.</p>
         <div>
           <div class="label-with-info"><label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label></div>
           <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
@@ -529,22 +537,39 @@
   <!-- Step: SCAIL2 character drive (idle / action separate) -->
   <section class="section locked" id="sec-scail" data-step="scail">
     <div class="section-head">
-      <h2>6. SCAIL2 apply image</h2>
+      <h2>6. SCAIL2 apply image <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done. (Idle SCAIL after idle skel; Action SCAIL after action skel.) Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults. Next: step 7 bg remove, then optional time overshoot.</span></span></h2>
       <span class="badge" id="badge-scail">locked</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">
-          Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
-          (Idle SCAIL after idle skel; Action SCAIL after action skel.)
-          Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
-          Next: step 7 bg remove, then optional time overshoot.
-        </p>
         <div id="scail-scale-slot">
-          <label for="scail_output_scale">SCAIL output scale <span id="scail_output_scale_label">100%</span></label>
+          <div class="label-with-info">
+            <label for="scail_output_scale">SCAIL output scale <span id="scail_output_scale_label">100%</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About SCAIL output scale">
+              i
+              <span class="info-bubble">Sets the final SCAIL video resolution (Step by step only). Skeleton motion is generated once and can be re-driven at different output scales.</span>
+            </span>
+          </div>
           <input type="range" id="scail_output_scale" min="0.25" max="1" step="0.05" value="1">
-          <p class="pose-hint">Only affects Step by step SCAIL result video size; skeleton motion can be reused.</p>
           <p class="size-readout" id="scail-size-readout">Image: &mdash;&nbsp;&rarr;&nbsp; Video: &mdash;</p>
+        </div>
+        <div id="scail-pose-strength-slot">
+          <div class="label-with-info">
+            <label for="scail_pose_strength">Pose strength <span id="scail_pose_strength_label">1.00</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About pose strength">i
+              <span class="info-bubble">How strongly the skeleton guide constrains the video (WanSCAIL pose_strength, 0&ndash;1). Higher = more faithful to the skeleton, e.g. a single raised hand stays single. Default 1.0 (official SCAIL2 / Camera Lab).</span>
+            </span>
+          </div>
+          <input type="range" id="scail_pose_strength" min="0" max="1" step="0.05" value="1">
+        </div>
+        <div id="scail-cfg-slot">
+          <div class="label-with-info">
+            <label for="scail_cfg">Guidance (cfg) <span id="scail_cfg_label">3.0</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About cfg">i
+              <span class="info-bubble">Classifier-free guidance &mdash; how strongly the positive/negative prompts steer the video. Higher = follows the text (and the negative) harder. Default 3.0; the LightX2V distill baseline is 1.0.</span>
+            </span>
+          </div>
+          <input type="range" id="scail_cfg" min="1" max="7" step="0.5" value="3">
         </div>
         <div>
           <label for="scail_idle_positive">SCAIL idle positive</label>
@@ -588,16 +613,11 @@
   <!-- Step: background removal — before time overshoot so timed clip can use nobg -->
   <section class="section" id="sec-bgremove" data-step="bgremove">
     <div class="section-head">
-      <h2>7. Background removal</h2>
+      <h2>7. Background removal <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">After SCAIL (or import any video). Preferred before Time overshoot so step 8 remaps the no-bg action clip. Uses local <code>videoBGremoval</code>. Also writes CapCut-ready <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.</span></span></h2>
       <span class="badge" id="badge-bgremove">ready</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">
-          After SCAIL (or import any video). Preferred before Time overshoot so step 8 remaps the no-bg action clip.
-          Uses local <code>videoBGremoval</code>. Also writes CapCut-ready
-          <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.
-        </p>
         <div>
           <label for="bgremove-video">Import video (optional)</label>
           <input type="file" id="bgremove-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv">
@@ -638,17 +658,11 @@
   <!-- Step: time overshoot — always unlocked; session video and/or upload -->
   <section class="section" id="sec-time" data-step="time">
     <div class="section-head">
-      <h2>8. Time overshoot (action video)</h2>
+      <h2>8. Time overshoot (action video) <span class="info-tip" tabindex="0" role="img" aria-label="About this step">i<span class="info-bubble">Always available. Spring playback remap (no joint edit, no re-SCAIL). Priority: upload → <code>action_nobg.webm</code> (real alpha) → alpha.mov → nobg.mp4 → action.mp4. Alpha sources stay transparent after remap; re-exports <code>action_nobg_alpha.mov</code> for CapCut. Browser preview mp4 flattens transparency onto neutral gray (same as bgremove preview).</span></span></h2>
       <span class="badge" id="badge-time">ready</span>
     </div>
     <div class="step-body">
       <div class="controls-col">
-        <p class="pose-hint">
-          Always available. Spring playback remap (no joint edit, no re-SCAIL).
-          Priority: upload → <code>action_nobg.webm</code> (real alpha) → alpha.mov → nobg.mp4 → action.mp4.
-          Alpha sources stay transparent after remap; re-exports <code>action_nobg_alpha.mov</code> for CapCut.
-          Browser preview mp4 flattens transparency onto neutral gray (same as bgremove preview).
-        </p>
         <div>
           <label for="time-video">Import video (optional)</label>
           <input type="file" id="time-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv,.m4v">

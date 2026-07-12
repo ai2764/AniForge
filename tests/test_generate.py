@@ -167,6 +167,25 @@ def test_align_motion_to_base_pose_preserves_deltas():
     assert np.allclose(locked[:, 0, :], base[0])
 
 
+def test_align_motion_to_base_pose_can_preserve_standing_lower_pose():
+    P = np.zeros((6, 22, 3), dtype=np.float64)
+    base = np.zeros((22, 3), dtype=np.float64)
+    # Extracted character starts with feet spread apart.
+    base[10, 0] = -0.7
+    base[11, 0] = 0.7
+    # Kimodo understood "legs together" as an absolute lower-body pose, so its
+    # feet are already close together from frame 0 onward. Delta-only retargeting
+    # would otherwise lose this intent.
+    P[:, 10, 0] = -0.1
+    P[:, 11, 0] = 0.1
+
+    out = align_motion_to_base_pose(P, base, keep=1.0, preserve_lower_pose=True)
+
+    assert np.allclose(out[0], base)
+    assert abs(out[-1, 10, 0] - out[-1, 11, 0]) < 0.35
+    assert abs(base[10, 0] - base[11, 0]) > 1.0
+
+
 def test_align_boost_upper_increases_weak_arm_motion():
     P = np.zeros((10, 22, 3), dtype=np.float64)
     base = np.zeros((22, 3), dtype=np.float64)
