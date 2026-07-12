@@ -17,6 +17,7 @@ pipeline/seated/runs/
 
 # Scratch / local junk
 _tmp*
+_server_*.log
 body.txt
 body2.txt
 *.local.md
