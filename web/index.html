@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AniForge</title>
 <style>
   :root { color-scheme: light dark; }
@@ -182,6 +183,12 @@
     flex-wrap: wrap;
   }
   .section-head h2 { margin: 0; }
+  .step-body { display: grid; grid-template-columns: minmax(340px, 400px) 1fr; gap: 1rem; align-items: start; }
+  .controls-col { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+  .preview-col { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+  .preview-col .preview-box { margin: 0; }
+  .preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  @media (max-width: 860px) { .step-body { grid-template-columns: 1fr; } .preview-row { grid-template-columns: 1fr; } }
   .badge {
     font-size: 0.75rem;
     font-weight: 600;
@@ -358,13 +365,19 @@
       <h2>2. Extract pose</h2>
       <span class="badge" id="badge-extract">locked</span>
     </div>
-    <p class="pose-hint" id="extract-hint">
-      HMR pose from the image, pin pelvis (limbs free). Review skeleton before Idle.
-    </p>
-    <button type="button" id="btn-extract" disabled>Start extract</button>
-    <div class="preview-box" id="box-extract">
-      <div class="preview-label">Extracted pose (still)</div>
-      <img id="img-extract" alt="extracted skeleton" style="display:none;width:100%;max-height:480px;object-fit:contain;background:#f0f0f0">
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint" id="extract-hint">
+          HMR pose from the image, pin pelvis (limbs free). Review skeleton before Idle.
+        </p>
+        <button type="button" id="btn-extract" disabled>Start extract</button>
+      </div>
+      <div class="preview-col">
+        <div class="preview-box" id="box-extract">
+          <div class="preview-label">Extracted pose (still)</div>
+          <img id="img-extract" alt="extracted skeleton" style="display:none;width:100%;max-height:480px;object-fit:contain;background:#f0f0f0">
+        </div>
+      </div>
     </div>
   </section>
 
@@ -374,35 +387,41 @@
       <h2>3. Idle skeleton motion</h2>
       <span class="badge" id="badge-idle">locked</span>
     </div>
-    <div>
-      <label for="idle_prompt">Idle prompt</label>
-      <input type="text" id="idle_prompt" name="idle_prompt"
-        value="A calm, continuously moving idle loop. Soft steady breathing lifts and lowers the chest and upper belly every cycle; the torso and spine gently sway and lean a little with the breath, and the shoulders rise and ease each time. The head makes small natural nods and slow side-to-side sways so the body never looks frozen. Keep every movement gentle, subtle, and continuous, with no large joint rotations, returning smoothly to a seamless loop.">
-      <p class="pose-hint">Live2D-style: ~2s loop, torso+head micro-motion, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
-    </div>
-    <div>
-      <div class="label-with-info">
-        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">20%</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About idle motion amount">
-          i
-          <span class="info-bubble">
-            Live2D-style idle post-process: extract pose fully stuck; arms/hands/legs locked.
-            Amount scales residual only on head/chest/shoulders from Kimodo, plus a fixed
-            sine breath (~0.95s period, ~0.2% body height). 0% = breath only;
-            8% = default subtle; higher = more Kimodo sway on free joints.
-            Duration is fixed ~2s seamless loop. Re-run Idle after changing.
-          </span>
-        </span>
+    <div class="step-body">
+      <div class="controls-col">
+        <div>
+          <label for="idle_prompt">Idle prompt</label>
+          <input type="text" id="idle_prompt" name="idle_prompt"
+            value="A calm, continuously moving idle loop. Soft steady breathing lifts and lowers the chest and upper belly every cycle; the torso and spine gently sway and lean a little with the breath, and the shoulders rise and ease each time. The head makes small natural nods and slow side-to-side sways so the body never looks frozen. Keep every movement gentle, subtle, and continuous, with no large joint rotations, returning smoothly to a seamless loop.">
+          <p class="pose-hint">Live2D-style: ~2s loop, torso+head micro-motion, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">20%</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About idle motion amount">
+              i
+              <span class="info-bubble">
+                Live2D-style idle post-process: extract pose fully stuck; arms/hands/legs locked.
+                Amount scales residual only on head/chest/shoulders from Kimodo, plus a fixed
+                sine breath (~0.95s period, ~0.2% body height). 0% = breath only;
+                8% = default subtle; higher = more Kimodo sway on free joints.
+                Duration is fixed ~2s seamless loop. Re-run Idle after changing.
+              </span>
+            </span>
+          </div>
+          <input type="range" id="idle_motion_keep" name="idle_motion_keep"
+            min="0" max="1" step="0.01" value="0.20">
+          <p class="pose-hint">Default 20%. Re-run Idle after changing (not live).</p>
+        </div>
+        <button type="button" id="btn-idle" disabled>Start idle motion</button>
       </div>
-      <input type="range" id="idle_motion_keep" name="idle_motion_keep"
-        min="0" max="1" step="0.01" value="0.20">
-      <p class="pose-hint">Default 20%. Re-run Idle after changing (not live).</p>
-    </div>
-    <button type="button" id="btn-idle" disabled>Start idle motion</button>
-    <div class="preview-box" id="box-idle-skel">
-      <div class="preview-label">Idle skeleton video</div>
-      <img id="img-idle-skel" alt="idle skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
-      <video id="vid-idle-skel" muted loop playsinline controls autoplay></video>
+      <div class="preview-col">
+        <div class="preview-box" id="box-idle-skel">
+          <div class="preview-label">Idle skeleton video</div>
+          <img id="img-idle-skel" alt="idle skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
+          <video id="vid-idle-skel" muted loop playsinline controls autoplay></video>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -412,51 +431,57 @@
       <h2>4. Action skeleton motion</h2>
       <span class="badge" id="badge-action">locked</span>
     </div>
-    <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size. Action prompt is on the <strong>Run all</strong> tab (synced).</p>
-    <div>
-      <label for="action_prompt_steps">Action prompt</label>
-      <textarea id="action_prompt_steps" name="action_prompt_steps" rows="3"
-        placeholder="Same as Run all tab — e.g. wave hello with one hand"></textarea>
-      <p class="pose-hint">Synced with Run all → Action prompt.</p>
-    </div>
-    <div>
-      <div class="label-with-info">
-        <label for="action_duration">Action duration <span id="action_duration_label">2.0s</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About action duration">
-          i
-          <span class="info-bubble">
-            Length of the action clip in seconds (Kimodo @ 30fps, then SCAIL).
-            Default 2.0s — good for raise-hand / short gestures.
-            1.0–1.5s = snappy; 2.5–3s = longer phrases. Re-run Action + SCAIL action after change.
-          </span>
-        </span>
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint">No need to wait for Idle. After Extract you can run Action. Start pose sticks to extract; sitting/lying locks legs. Amount = swing size. Action prompt is on the <strong>Run all</strong> tab (synced).</p>
+        <div>
+          <label for="action_prompt_steps">Action prompt</label>
+          <textarea id="action_prompt_steps" name="action_prompt_steps" rows="3"
+            placeholder="Same as Run all tab — e.g. wave hello with one hand"></textarea>
+          <p class="pose-hint">Synced with Run all → Action prompt.</p>
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="action_duration">Action duration <span id="action_duration_label">2.0s</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About action duration">
+              i
+              <span class="info-bubble">
+                Length of the action clip in seconds (Kimodo @ 30fps, then SCAIL).
+                Default 2.0s — good for raise-hand / short gestures.
+                1.0–1.5s = snappy; 2.5–3s = longer phrases. Re-run Action + SCAIL action after change.
+              </span>
+            </span>
+          </div>
+          <input type="range" id="action_duration" name="action_duration"
+            min="1" max="3" step="0.1" value="2">
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="action_motion_keep">Action motion amount <span id="action_motion_keep_label">100%</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About action motion amount">
+              i
+              <span class="info-bubble">
+                Scales how big the action swing is (not start-pose stick).
+                Start pose always fully matches extract; sitting/lying legs stay locked.
+                100% = full (boosted) action; 50% = half; 0% = frozen extract.
+                If 100% still looks like idle, re-run Action after server restart —
+                action is generated free then retargeted so arms can move large.
+              </span>
+            </span>
+          </div>
+          <input type="range" id="action_motion_keep" name="action_motion_keep"
+            min="0" max="1" step="0.01" value="1">
+          <p class="pose-hint">Re-run Action (+ SCAIL action) after changing duration/amount.</p>
+        </div>
+        <button type="button" id="btn-action" disabled>Start action motion</button>
       </div>
-      <input type="range" id="action_duration" name="action_duration"
-        min="1" max="3" step="0.1" value="2">
-    </div>
-    <div>
-      <div class="label-with-info">
-        <label for="action_motion_keep">Action motion amount <span id="action_motion_keep_label">100%</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About action motion amount">
-          i
-          <span class="info-bubble">
-            Scales how big the action swing is (not start-pose stick).
-            Start pose always fully matches extract; sitting/lying legs stay locked.
-            100% = full (boosted) action; 50% = half; 0% = frozen extract.
-            If 100% still looks like idle, re-run Action after server restart —
-            action is generated free then retargeted so arms can move large.
-          </span>
-        </span>
+      <div class="preview-col">
+        <div class="preview-box" id="box-action-skel">
+          <div class="preview-label">Action skeleton video</div>
+          <img id="img-action-skel" alt="action skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
+          <video id="vid-action-skel" muted loop playsinline controls autoplay></video>
+        </div>
       </div>
-      <input type="range" id="action_motion_keep" name="action_motion_keep"
-        min="0" max="1" step="0.01" value="1">
-      <p class="pose-hint">Re-run Action (+ SCAIL action) after changing duration/amount.</p>
-    </div>
-    <button type="button" id="btn-action" disabled>Start action motion</button>
-    <div class="preview-box" id="box-action-skel">
-      <div class="preview-label">Action skeleton video</div>
-      <img id="img-action-skel" alt="action skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
-      <video id="vid-action-skel" muted loop playsinline controls autoplay></video>
     </div>
   </section>
 
@@ -466,38 +491,44 @@
       <h2>5. Joint overshoot (optional)</h2>
       <span class="badge" id="badge-joint">locked</span>
     </div>
-    <p class="pose-hint">Springy follow-through on the action skeleton (before SCAIL). Set the spring, then <strong>check "Carry into SCAIL"</strong> to apply it — the overshot skeleton is what SCAIL will drive. Uncheck to revert to the plain action skeleton (no Kimodo re-sample). Adjusting a slider while carried re-applies.</p>
-    <div>
-      <div class="label-with-info">
-        <label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About omega">i
-          <span class="info-bubble">How fast joints spring toward the target. Higher = quicker, snappier follow-through.</span>
-        </span>
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint">Springy follow-through on the action skeleton (before SCAIL). Set the spring, then <strong>check "Carry into SCAIL"</strong> to apply it — the overshot skeleton is what SCAIL will drive. Uncheck to revert to the plain action skeleton (no Kimodo re-sample). Adjusting a slider while carried re-applies.</p>
+        <div>
+          <div class="label-with-info">
+            <label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About omega">i
+              <span class="info-bubble">How fast joints spring toward the target. Higher = quicker, snappier follow-through.</span>
+            </span>
+          </div>
+          <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About zeta">i
+              <span class="info-bubble">Damping ratio. Lower = more bounce/overshoot; higher = settles fast with little overshoot.</span>
+            </span>
+          </div>
+          <input type="range" id="joint_zeta" name="joint_zeta" min="0.05" max="1" step="0.05" value="0.35">
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About soft">i
+              <span class="info-bubble">Scales per-joint softness (distal joints overshoot more). 0 = rigid, 2 = very loose.</span>
+            </span>
+          </div>
+          <input type="range" id="joint_soft" name="joint_soft" min="0" max="2" step="0.1" value="1">
+        </div>
+        <label id="lbl-joint-carry" style="opacity:0.5"><input type="checkbox" id="joint-carry" disabled> Carry into SCAIL (apply overshoot)</label>
       </div>
-      <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
-    </div>
-    <div>
-      <div class="label-with-info">
-        <label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About zeta">i
-          <span class="info-bubble">Damping ratio. Lower = more bounce/overshoot; higher = settles fast with little overshoot.</span>
-        </span>
+      <div class="preview-col">
+        <div class="preview-box" id="box-joint-skel">
+          <div class="preview-label">Overshot action skeleton</div>
+          <video id="vid-joint-skel" muted loop playsinline controls autoplay></video>
+        </div>
       </div>
-      <input type="range" id="joint_zeta" name="joint_zeta" min="0.05" max="1" step="0.05" value="0.35">
-    </div>
-    <div>
-      <div class="label-with-info">
-        <label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label>
-        <span class="info-tip" tabindex="0" role="img" aria-label="About soft">i
-          <span class="info-bubble">Scales per-joint softness (distal joints overshoot more). 0 = rigid, 2 = very loose.</span>
-        </span>
-      </div>
-      <input type="range" id="joint_soft" name="joint_soft" min="0" max="2" step="0.1" value="1">
-    </div>
-    <label id="lbl-joint-carry" style="opacity:0.5"><input type="checkbox" id="joint-carry" disabled> Carry into SCAIL (apply overshoot)</label>
-    <div class="preview-box" id="box-joint-skel">
-      <div class="preview-label">Overshot action skeleton</div>
-      <video id="vid-joint-skel" muted loop playsinline controls autoplay></video>
     </div>
   </section>
 
@@ -507,44 +538,50 @@
       <h2>6. SCAIL2 apply image</h2>
       <span class="badge" id="badge-scail">locked</span>
     </div>
-    <p class="pose-hint">
-      Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
-      (Idle SCAIL after idle skel; Action SCAIL after action skel.)
-      Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
-      Next: step 7 bg remove, then optional time overshoot.
-    </p>
-    <div>
-      <label for="scail_idle_positive">SCAIL idle positive</label>
-      <textarea id="scail_idle_positive" name="scail_idle_positive" rows="5"
-        placeholder="Loading defaults…"></textarea>
-    </div>
-    <div>
-      <label for="scail_action_positive">SCAIL action positive</label>
-      <textarea id="scail_action_positive" name="scail_action_positive" rows="5"
-        placeholder="Loading defaults…"></textarea>
-      <p class="pose-hint">Default action positive embeds step-4 Action prompt. “Reload defaults” refreshes from server (uses current Action prompt).</p>
-    </div>
-    <div>
-      <label for="scail_negative">SCAIL negative</label>
-      <textarea id="scail_negative" name="scail_negative" rows="3"
-        placeholder="Loading defaults…"></textarea>
-    </div>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0.4rem 0 0.6rem">
-      <button type="button" id="btn-scail-defaults" class="btn-secondary">Reload SCAIL defaults</button>
-    </div>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
-      <button type="button" id="btn-scail-idle" disabled>SCAIL idle</button>
-      <span class="badge" id="badge-scail-idle">locked</span>
-      <button type="button" id="btn-scail-action" disabled>SCAIL action</button>
-      <span class="badge" id="badge-scail-action">locked</span>
-    </div>
-    <div class="preview-box" id="box-idle-video">
-      <div class="preview-label">Idle result</div>
-      <video id="vid-idle-video" muted loop playsinline controls autoplay></video>
-    </div>
-    <div class="preview-box" id="box-action-video">
-      <div class="preview-label">Action result</div>
-      <video id="vid-action-video" muted playsinline controls></video>
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint">
+          Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
+          (Idle SCAIL after idle skel; Action SCAIL after action skel.)
+          Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
+          Next: step 7 bg remove, then optional time overshoot.
+        </p>
+        <div>
+          <label for="scail_idle_positive">SCAIL idle positive</label>
+          <textarea id="scail_idle_positive" name="scail_idle_positive" rows="5"
+            placeholder="Loading defaults…"></textarea>
+        </div>
+        <div>
+          <label for="scail_action_positive">SCAIL action positive</label>
+          <textarea id="scail_action_positive" name="scail_action_positive" rows="5"
+            placeholder="Loading defaults…"></textarea>
+          <p class="pose-hint">Default action positive embeds step-4 Action prompt. “Reload defaults” refreshes from server (uses current Action prompt).</p>
+        </div>
+        <div>
+          <label for="scail_negative">SCAIL negative</label>
+          <textarea id="scail_negative" name="scail_negative" rows="3"
+            placeholder="Loading defaults…"></textarea>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0.4rem 0 0.6rem">
+          <button type="button" id="btn-scail-defaults" class="btn-secondary">Reload SCAIL defaults</button>
+        </div>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+          <button type="button" id="btn-scail-idle" disabled>SCAIL idle</button>
+          <span class="badge" id="badge-scail-idle">locked</span>
+          <button type="button" id="btn-scail-action" disabled>SCAIL action</button>
+          <span class="badge" id="badge-scail-action">locked</span>
+        </div>
+      </div>
+      <div class="preview-col">
+        <div class="preview-box" id="box-idle-video">
+          <div class="preview-label">Idle result</div>
+          <video id="vid-idle-video" muted loop playsinline controls autoplay></video>
+        </div>
+        <div class="preview-box" id="box-action-video">
+          <div class="preview-label">Action result</div>
+          <video id="vid-action-video" muted playsinline controls></video>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -554,42 +591,48 @@
       <h2>7. Background removal</h2>
       <span class="badge" id="badge-bgremove">ready</span>
     </div>
-    <p class="pose-hint">
-      After SCAIL (or import any video). Preferred before Time overshoot so step 8 remaps the no-bg action clip.
-      Uses local <code>videoBGremoval</code>. Also writes CapCut-ready
-      <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.
-    </p>
-    <div>
-      <label for="bgremove-video">Import video (optional)</label>
-      <input type="file" id="bgremove-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv">
-      <p class="pose-hint" id="bgremove-video-name">No file chosen — will use session idle/action if checked.</p>
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint">
+          After SCAIL (or import any video). Preferred before Time overshoot so step 8 remaps the no-bg action clip.
+          Uses local <code>videoBGremoval</code>. Also writes CapCut-ready
+          <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.
+        </p>
+        <div>
+          <label for="bgremove-video">Import video (optional)</label>
+          <input type="file" id="bgremove-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv">
+          <p class="pose-hint" id="bgremove-video-name">No file chosen — will use session idle/action if checked.</p>
+        </div>
+        <div>
+          <label for="bgremove_model">Matting model</label>
+          <select id="bgremove_model" name="bgremove_model" style="width:100%;padding:0.4rem;box-sizing:border-box">
+            <option value="RVM MobileNetV3">RVM MobileNetV3 (fast)</option>
+            <option value="RVM ResNet50">RVM ResNet50</option>
+            <option value="RMBG-2.0 HQ" selected>RMBG-2.0 HQ (sharper edges)</option>
+          </select>
+        </div>
+        <div class="checkboxes">
+          <label><input type="checkbox" id="bgremove_idle" checked> Session idle.mp4</label>
+          <label><input type="checkbox" id="bgremove_action" checked> Session action.mp4</label>
+        </div>
+        <button type="button" id="btn-bgremove">Remove background</button>
+        <p class="pose-hint" id="bgremove-links"></p>
+      </div>
+      <div class="preview-col">
+        <div class="preview-box" id="box-upload-nobg">
+          <div class="preview-label">Upload no-bg (preview)</div>
+          <video id="vid-upload-nobg" muted loop playsinline controls></video>
+        </div>
+        <div class="preview-box" id="box-idle-nobg">
+          <div class="preview-label">Idle no-bg (preview)</div>
+          <video id="vid-idle-nobg" muted loop playsinline controls></video>
+        </div>
+        <div class="preview-box" id="box-action-nobg">
+          <div class="preview-label">Action no-bg (preview)</div>
+          <video id="vid-action-nobg" muted playsinline controls></video>
+        </div>
+      </div>
     </div>
-    <div>
-      <label for="bgremove_model">Matting model</label>
-      <select id="bgremove_model" name="bgremove_model" style="width:100%;padding:0.4rem;box-sizing:border-box">
-        <option value="RVM MobileNetV3">RVM MobileNetV3 (fast)</option>
-        <option value="RVM ResNet50">RVM ResNet50</option>
-        <option value="RMBG-2.0 HQ" selected>RMBG-2.0 HQ (sharper edges)</option>
-      </select>
-    </div>
-    <div class="checkboxes">
-      <label><input type="checkbox" id="bgremove_idle" checked> Session idle.mp4</label>
-      <label><input type="checkbox" id="bgremove_action" checked> Session action.mp4</label>
-    </div>
-    <button type="button" id="btn-bgremove">Remove background</button>
-    <div class="preview-box" id="box-upload-nobg">
-      <div class="preview-label">Upload no-bg (preview)</div>
-      <video id="vid-upload-nobg" muted loop playsinline controls></video>
-    </div>
-    <div class="preview-box" id="box-idle-nobg">
-      <div class="preview-label">Idle no-bg (preview)</div>
-      <video id="vid-idle-nobg" muted loop playsinline controls></video>
-    </div>
-    <div class="preview-box" id="box-action-nobg">
-      <div class="preview-label">Action no-bg (preview)</div>
-      <video id="vid-action-nobg" muted playsinline controls></video>
-    </div>
-    <p class="pose-hint" id="bgremove-links"></p>
   </section>
 
   <!-- Step: time overshoot — always unlocked; session video and/or upload -->
@@ -598,22 +641,28 @@
       <h2>8. Time overshoot (action video)</h2>
       <span class="badge" id="badge-time">ready</span>
     </div>
-    <p class="pose-hint">
-      Always available. Spring playback remap (no joint edit, no re-SCAIL).
-      Priority: upload → <code>action_nobg.webm</code> (real alpha) → alpha.mov → nobg.mp4 → action.mp4.
-      Alpha sources stay transparent after remap; re-exports <code>action_nobg_alpha.mov</code> for CapCut.
-      Browser preview mp4 flattens transparency onto neutral gray (same as bgremove preview).
-    </p>
-    <div>
-      <label for="time-video">Import video (optional)</label>
-      <input type="file" id="time-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv,.m4v">
-      <p class="pose-hint" id="time-video-name">No file chosen — will use session action_nobg / action.mp4 if present.</p>
-    </div>
-    <p class="pose-hint">Time overshoot toggle lives on the Run all tab (same control). This button always runs remap.</p>
-    <button type="button" id="btn-time">Apply time overshoot</button>
-    <div class="preview-box" id="box-time-video">
-      <div class="preview-label">Timed action video</div>
-      <video id="vid-time-video" muted playsinline controls></video>
+    <div class="step-body">
+      <div class="controls-col">
+        <p class="pose-hint">
+          Always available. Spring playback remap (no joint edit, no re-SCAIL).
+          Priority: upload → <code>action_nobg.webm</code> (real alpha) → alpha.mov → nobg.mp4 → action.mp4.
+          Alpha sources stay transparent after remap; re-exports <code>action_nobg_alpha.mov</code> for CapCut.
+          Browser preview mp4 flattens transparency onto neutral gray (same as bgremove preview).
+        </p>
+        <div>
+          <label for="time-video">Import video (optional)</label>
+          <input type="file" id="time-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv,.m4v">
+          <p class="pose-hint" id="time-video-name">No file chosen — will use session action_nobg / action.mp4 if present.</p>
+        </div>
+        <p class="pose-hint">Time overshoot toggle lives on the Run all tab (same control). This button always runs remap.</p>
+        <button type="button" id="btn-time">Apply time overshoot</button>
+      </div>
+      <div class="preview-col">
+        <div class="preview-box" id="box-time-video">
+          <div class="preview-label">Timed action video</div>
+          <video id="vid-time-video" muted playsinline controls></video>
+        </div>
+      </div>
     </div>
   </section>
 
