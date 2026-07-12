@@ -368,9 +368,68 @@ LOWER_BODY_ACTION_RE = re.compile(
     re.I,
 )
 
+CLOSE_LOWER_BODY_ACTION_RE = re.compile(
+    r"\b("
+    r"clos(?:e|es|ed|ing)\s+(?:his\s+|her\s+|their\s+|the\s+)?legs|"
+    r"bring(?:s|ing)?\s+(?:both\s+)?feet\s+(?:in|inward|inwards|together|close)|"
+    r"(?:feet|legs)\s+(?:are\s+)?(?:close\s+together|together)|"
+    r"narrow\s+stance"
+    r")\b",
+    re.I,
+)
+
 
 def lower_body_action_requested(prompt: str | None) -> bool:
     return bool(LOWER_BODY_ACTION_RE.search(prompt or ""))
+
+
+def close_lower_body_action_requested(prompt: str | None) -> bool:
+    return bool(CLOSE_LOWER_BODY_ACTION_RE.search(prompt or ""))
+
+
+def _close_standing_feet(posed_joints, *, max_foot_gap_ratio: float = 0.12):
+    """Ease knees/ankles/feet toward a narrow stance while preserving frame 0."""
+    import numpy as np
+
+    out = np.asarray(posed_joints, dtype=np.float64).copy()
+    if out.ndim != 3 or out.shape[0] < 2 or out.shape[1] <= 11:
+        return out
+
+    start_gap = float(np.linalg.norm(out[0, 10, [0, 2]] - out[0, 11, [0, 2]]))
+    if start_gap < 1e-6:
+        return out
+
+    target_foot_gap = max(start_gap * float(max_foot_gap_ratio), 1e-4)
+    pair_targets = (
+        (4, 5, start_gap * 0.45),        # knees should narrow, not collapse
+        (7, 8, target_foot_gap * 1.15),  # ankles almost together
+        (10, 11, target_foot_gap),       # feet together read
+    )
+    alpha = np.linspace(0.0, 1.0, out.shape[0], dtype=np.float64)
+    alpha = 0.5 - 0.5 * np.cos(np.pi * alpha)
+
+    for left, right, target_gap in pair_targets:
+        if right >= out.shape[1]:
+            continue
+        mid = 0.5 * (out[:, left, [0, 2]] + out[:, right, [0, 2]])
+        sep = out[:, right, [0, 2]] - out[:, left, [0, 2]]
+        gap = np.linalg.norm(sep, axis=1)
+        scale = np.ones_like(gap)
+        mask = gap > target_gap
+        scale[mask] = target_gap / np.maximum(gap[mask], 1e-8)
+        narrowed = sep * scale[:, None]
+        left_xz = mid - 0.5 * narrowed
+        right_xz = mid + 0.5 * narrowed
+        out[:, left, [0, 2]] = (
+            (1.0 - alpha[:, None]) * out[:, left, [0, 2]]
+            + alpha[:, None] * left_xz
+        )
+        out[:, right, [0, 2]] = (
+            (1.0 - alpha[:, None]) * out[:, right, [0, 2]]
+            + alpha[:, None] * right_xz
+        )
+
+    return out
 
 
 def align_motion_to_base_pose(
@@ -380,6 +439,7 @@ def align_motion_to_base_pose(
     *,
     lock_lower_body: bool = False,
     preserve_lower_pose: bool = False,
+    close_lower_body: bool = False,
     boost_upper: bool = False,
     upper_ref_std: float = ACTION_UPPER_REF_STD,
 ):
@@ -393,6 +453,8 @@ def align_motion_to_base_pose(
     leaving legs and feet free.
     preserve_lower_pose: for standing lower-body actions, preserve Kimodo's
     lower-body pose relative to its pelvis instead of only applying frame deltas.
+    close_lower_body: for explicit "feet together / close legs" actions, ease
+    the generated standing lower body into a narrow stance.
     boost_upper: if upper-body residual is tiny, amplify toward upper_ref_std
     so keep=100% is visibly different from idle.
     """
@@ -454,6 +516,10 @@ def align_motion_to_base_pose(
                 + alpha[:, None, None] * target
             )
             out[0] = base
+
+    if close_lower_body and preserve_lower_pose and not lock_lower_body:
+        out = _close_standing_feet(out)
+        out[0] = base
 
     # Apply amount slider on residual from base (frame 0 stays base).
     if k < 1.0:

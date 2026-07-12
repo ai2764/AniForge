@@ -3,6 +3,7 @@ from pathlib import Path
 from PIL import Image
 
 import numpy as np
+import pipeline.generate as gen
 
 from pipeline.generate import (
     plan_steps,
@@ -184,6 +185,37 @@ def test_align_motion_to_base_pose_can_preserve_standing_lower_pose():
     assert np.allclose(out[0], base)
     assert abs(out[-1, 10, 0] - out[-1, 11, 0]) < 0.35
     assert abs(base[10, 0] - base[11, 0]) > 1.0
+
+
+def test_close_lower_body_action_requested_detects_feet_together():
+    assert hasattr(gen, "close_lower_body_action_requested")
+    assert gen.close_lower_body_action_requested(
+        "A person steps both feet inward until the feet are close together."
+    )
+    assert gen.close_lower_body_action_requested("A person is closing his legs.")
+    assert not gen.close_lower_body_action_requested("A person walks forward.")
+
+
+def test_align_motion_to_base_pose_can_close_standing_feet():
+    P = np.zeros((6, 22, 3), dtype=np.float64)
+    base = np.zeros((22, 3), dtype=np.float64)
+    base[10, 0] = -0.7
+    base[11, 0] = 0.7
+    # Kimodo narrows the stance, but not enough to read as feet together.
+    P[:, 10, 0] = np.linspace(-0.7, -0.25, 6)
+    P[:, 11, 0] = np.linspace(0.7, 0.25, 6)
+
+    out = align_motion_to_base_pose(
+        P,
+        base,
+        keep=1.0,
+        preserve_lower_pose=True,
+        close_lower_body=True,
+    )
+
+    assert np.allclose(out[0], base)
+    assert abs(out[-1, 10, 0] - out[-1, 11, 0]) < 0.20
+    assert abs(out[-1, 10, 0] - out[-1, 11, 0]) < abs(P[-1, 10, 0] - P[-1, 11, 0])
 
 
 def test_align_boost_upper_increases_weak_arm_motion():

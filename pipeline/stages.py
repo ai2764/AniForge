@@ -27,6 +27,7 @@ from pipeline.generate import (
     _pad_to_aspect,
     align_4k1,
     align_motion_to_base_pose,
+    close_lower_body_action_requested,
     dampen_idle_joints,
     prepare_idle_source_motion,
     plan_steps,
@@ -483,6 +484,7 @@ def stage_action(
         return {"run_id": run_id, "errors": {"action": "action_prompt is required"}}
     action_text = sanitize_action(action_prompt)
     lower_pose = lower_body_action_requested(action_text)
+    close_lower_pose = close_lower_body_action_requested(action_text)
     keep = _parse_action_motion_keep(
         action_motion_keep if action_motion_keep is not None else meta.get("action_motion_keep"),
         default=ACTION_MOTION_KEEP,
@@ -509,6 +511,7 @@ def stage_action(
         "action_motion_keep": keep,
         "action_duration": duration,
         "preserve_lower_pose": action_pose_mode == "standing" and lower_pose,
+        "close_lower_pose": action_pose_mode == "standing" and close_lower_pose,
         "extract_pose_strength": 1.0,
     }
 
@@ -550,6 +553,7 @@ def stage_action(
             keep=keep,
             lock_lower_body=lock_lower,
             preserve_lower_pose=action_pose_mode == "standing" and lower_pose,
+            close_lower_body=action_pose_mode == "standing" and close_lower_pose,
             boost_upper=True,
         )
         f0_err = float(np.linalg.norm(P[0] - base, axis=-1).mean())
@@ -601,6 +605,7 @@ def stage_action(
         out["action_f0_err_before"] = f0_err_before
         out["action_f0_err_disk"] = f0_disk
         out["action_lock_lower"] = lock_lower
+        out["action_close_lower_pose"] = action_pose_mode == "standing" and close_lower_pose
         out["action_motion_keep"] = keep
         out["kimodo_constraint"] = bool(job.get("constraint_json"))
     except Exception as exc:
@@ -612,6 +617,7 @@ def stage_action(
     meta["action_prompt"] = action_text
     meta["action_pose_mode"] = action_pose_mode
     meta["action_preserve_lower_pose"] = action_pose_mode == "standing" and lower_pose
+    meta["action_close_lower_pose"] = action_pose_mode == "standing" and close_lower_pose
     meta["action_motion_keep"] = keep
     meta["action_duration"] = duration
     meta["action_anchored_to_extract"] = True
