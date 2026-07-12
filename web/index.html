@@ -8,10 +8,12 @@
   :root { color-scheme: light dark; }
   body {
     font-family: system-ui, sans-serif;
-    max-width: 720px;
+    max-width: 1040px;
     margin: 2rem auto;
     padding: 0 1rem;
   }
+  /* Keep text-first, single-column content readable while step rows go wide. */
+  #setup-form, .run-all-card, #sec-play { max-width: 720px; }
   h1 { font-size: 1.4rem; margin-bottom: 0.15rem; }
   .tagline {
     font-size: 1rem;
