@@ -377,12 +377,12 @@
     <div>
       <label for="idle_prompt">Idle prompt</label>
       <input type="text" id="idle_prompt" name="idle_prompt"
-        value="A person holds their current pose in a calm seamless idle loop. Only tiny continuous breathing of the chest and a very slight head nod and sway; shoulders barely move. Arms, hands, and legs stay still and fixed in place. No waving, no gesturing, no walking, no dancing, no large joint rotations. Do not stand up or sit down; keep the same overall posture. Mouth closed and still the entire time, lips sealed, silent, no talking, no speaking, no lip movement, no chewing.">
-      <p class="pose-hint">Live2D-style: ~2s loop, head+chest micro, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
+        value="A calm, continuously moving idle loop. Soft steady breathing lifts and lowers the chest and upper belly every cycle; the torso and spine gently sway and lean a little with the breath, and the shoulders rise and ease each time. The head makes small natural nods and slow side-to-side sways so the body never looks frozen. Keep every movement gentle, subtle, and continuous, with no large joint rotations, returning smoothly to a seamless loop.">
+      <p class="pose-hint">Live2D-style: ~2s loop, torso+head micro-motion, arms/legs locked, seamless. Amount = Kimodo residual on free joints only.</p>
     </div>
     <div>
       <div class="label-with-info">
-        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">8%</span></label>
+        <label for="idle_motion_keep">Idle motion amount <span id="idle_motion_keep_label">20%</span></label>
         <span class="info-tip" tabindex="0" role="img" aria-label="About idle motion amount">
           i
           <span class="info-bubble">
@@ -395,8 +395,8 @@
         </span>
       </div>
       <input type="range" id="idle_motion_keep" name="idle_motion_keep"
-        min="0" max="1" step="0.01" value="0.08">
-      <p class="pose-hint">Default 8%. Re-run Idle after changing (not live).</p>
+        min="0" max="1" step="0.01" value="0.20">
+      <p class="pose-hint">Default 20%. Re-run Idle after changing (not live).</p>
     </div>
     <button type="button" id="btn-idle" disabled>Start idle motion</button>
     <div class="preview-box" id="box-idle-skel">
@@ -452,11 +452,7 @@
         min="0" max="1" step="0.01" value="1">
       <p class="pose-hint">Re-run Action (+ SCAIL action) after changing duration/amount.</p>
     </div>
-    <p class="pose-hint">Joint overshoot: use checkbox on Run all tab (same control).</p>
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-      <button type="button" id="btn-action" disabled>Start action motion</button>
-      <button type="button" id="btn-joint" disabled>Apply joint overshoot</button>
-    </div>
+    <button type="button" id="btn-action" disabled>Start action motion</button>
     <div class="preview-box" id="box-action-skel">
       <div class="preview-label">Action skeleton video</div>
       <img id="img-action-skel" alt="action skeleton fallback" style="display:none;width:100%;background:#f0f0f0">
@@ -464,17 +460,58 @@
     </div>
   </section>
 
+  <!-- Step: joint overshoot (optional, standalone) -->
+  <section class="section locked" id="sec-joint" data-step="joint">
+    <div class="section-head">
+      <h2>5. Joint overshoot (optional)</h2>
+      <span class="badge" id="badge-joint">locked</span>
+    </div>
+    <p class="pose-hint">Springy follow-through on the action skeleton (before SCAIL). Set the spring, then <strong>check "Carry into SCAIL"</strong> to apply it — the overshot skeleton is what SCAIL will drive. Uncheck to revert to the plain action skeleton (no Kimodo re-sample). Adjusting a slider while carried re-applies.</p>
+    <div>
+      <div class="label-with-info">
+        <label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About omega">i
+          <span class="info-bubble">How fast joints spring toward the target. Higher = quicker, snappier follow-through.</span>
+        </span>
+      </div>
+      <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
+    </div>
+    <div>
+      <div class="label-with-info">
+        <label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About zeta">i
+          <span class="info-bubble">Damping ratio. Lower = more bounce/overshoot; higher = settles fast with little overshoot.</span>
+        </span>
+      </div>
+      <input type="range" id="joint_zeta" name="joint_zeta" min="0.05" max="1" step="0.05" value="0.35">
+    </div>
+    <div>
+      <div class="label-with-info">
+        <label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label>
+        <span class="info-tip" tabindex="0" role="img" aria-label="About soft">i
+          <span class="info-bubble">Scales per-joint softness (distal joints overshoot more). 0 = rigid, 2 = very loose.</span>
+        </span>
+      </div>
+      <input type="range" id="joint_soft" name="joint_soft" min="0" max="2" step="0.1" value="1">
+    </div>
+    <label id="lbl-joint-carry" style="opacity:0.5"><input type="checkbox" id="joint-carry" disabled> Carry into SCAIL (apply overshoot)</label>
+    <div class="preview-box" id="box-joint-skel">
+      <div class="preview-label">Overshot action skeleton</div>
+      <video id="vid-joint-skel" muted loop playsinline controls autoplay></video>
+    </div>
+  </section>
+
   <!-- Step: SCAIL2 character drive (idle / action separate) -->
   <section class="section locked" id="sec-scail" data-step="scail">
     <div class="section-head">
-      <h2>5. SCAIL2 apply image</h2>
+      <h2>6. SCAIL2 apply image</h2>
       <span class="badge" id="badge-scail">locked</span>
     </div>
     <p class="pose-hint">
       Idle SCAIL and Action SCAIL run separately. Prerequisite: the matching skeleton motion is done.
       (Idle SCAIL after idle skel; Action SCAIL after action skel.)
       Prompts describe the finished video (not edit instructions). Defaults come from the product recipe; empty fields fall back to server defaults.
-      Next: step 6 bg remove, then optional time overshoot.
+      Next: step 7 bg remove, then optional time overshoot.
     </p>
     <div>
       <label for="scail_idle_positive">SCAIL idle positive</label>
@@ -514,11 +551,11 @@
   <!-- Step: background removal — before time overshoot so timed clip can use nobg -->
   <section class="section" id="sec-bgremove" data-step="bgremove">
     <div class="section-head">
-      <h2>6. Background removal</h2>
+      <h2>7. Background removal</h2>
       <span class="badge" id="badge-bgremove">ready</span>
     </div>
     <p class="pose-hint">
-      After SCAIL (or import any video). Preferred before Time overshoot so step 7 remaps the no-bg action clip.
+      After SCAIL (or import any video). Preferred before Time overshoot so step 8 remaps the no-bg action clip.
       Uses local <code>videoBGremoval</code>. Also writes CapCut-ready
       <code>*_nobg_alpha.mov</code> (ProRes 4444, real alpha via libvpx-vp9). Kill Comfy if VRAM is full.
     </p>
@@ -558,7 +595,7 @@
   <!-- Step: time overshoot — always unlocked; session video and/or upload -->
   <section class="section" id="sec-time" data-step="time">
     <div class="section-head">
-      <h2>7. Time overshoot (action video)</h2>
+      <h2>8. Time overshoot (action video)</h2>
       <span class="badge" id="badge-time">ready</span>
     </div>
     <p class="pose-hint">

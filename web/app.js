@@ -12,7 +12,17 @@
   const btnExtract = document.getElementById("btn-extract");
   const btnIdle = document.getElementById("btn-idle");
   const btnAction = document.getElementById("btn-action");
-  const btnJoint = document.getElementById("btn-joint");
+  const secJoint = document.getElementById("sec-joint");
+  const badgeJoint = document.getElementById("badge-joint");
+  const chkJointCarry = document.getElementById("joint-carry");
+  const lblJointCarry = document.getElementById("lbl-joint-carry");
+  const jointOmega = document.getElementById("joint_omega");
+  const jointZeta = document.getElementById("joint_zeta");
+  const jointSoft = document.getElementById("joint_soft");
+  const jointOmegaLabel = document.getElementById("joint_omega_label");
+  const jointZetaLabel = document.getElementById("joint_zeta_label");
+  const jointSoftLabel = document.getElementById("joint_soft_label");
+  const vidJointSkel = document.getElementById("vid-joint-skel");
   const btnScailIdle = document.getElementById("btn-scail-idle");
   const btnScailAction = document.getElementById("btn-scail-action");
   const btnScailDefaults = document.getElementById("btn-scail-defaults");
@@ -101,6 +111,12 @@
 
   function jointChecked() {
     return !!(chkJoint && chkJoint.checked);
+  }
+  // Enable/disable the step-by-step joint-overshoot checkbox (with label dimming).
+  function setJointCarryEnabled(on) {
+    if (!chkJointCarry) return;
+    chkJointCarry.disabled = !on;
+    if (lblJointCarry) lblJointCarry.style.opacity = on ? "1" : "0.5";
   }
   function timeChecked() {
     return !!(chkTime && chkTime.checked);
@@ -368,9 +384,7 @@
     btnExtract.disabled = on || !runId;
     btnIdle.disabled = on || !runId || secIdle.classList.contains("locked");
     btnAction.disabled = on || !runId || secAction.classList.contains("locked");
-    if (btnJoint) {
-      btnJoint.disabled = on || !runId || !actionSkelReady;
-    }
+    setJointCarryEnabled(!on && !!runId && actionSkelReady);
     if (btnScailIdle) {
       btnScailIdle.disabled = on || !runId || !idleSkelReady;
     }
@@ -479,7 +493,9 @@
       btnTime.disabled = !runId && !hasTimeFile;
     }
     lock(secPlay, badgePlay, "locked");
-    if (btnJoint) btnJoint.disabled = true;
+    if (chkJointCarry) chkJointCarry.checked = false;
+    setJointCarryEnabled(false);
+    if (secJoint && badgeJoint) lock(secJoint, badgeJoint, "locked");
     if (btnScailIdle) btnScailIdle.disabled = true;
     if (btnScailAction) btnScailAction.disabled = true;
     // BG remove stays available (upload and/or session files)
@@ -686,7 +702,12 @@
     showActionSkel(data);
     actionSkelReady = true;
     actionScailReady = false; // skeleton changed — need SCAIL action again
-    if (btnJoint) btnJoint.disabled = false;
+    // SCAIL action positive inherits the Kimodo action prompt verbatim on each run.
+    if (scailActionPositiveEl) scailActionPositiveEl.value = actionPrompt;
+    // Fresh action skeleton is plain (no overshoot): reset + enable the toggle.
+    if (chkJointCarry) chkJointCarry.checked = false;
+    if (secJoint && badgeJoint) unlock(secJoint, badgeJoint, "ready");
+    setJointCarryEnabled(true);
     unlockScailSection();
     if (btnScailAction) {
       btnScailAction.disabled = false;
@@ -703,15 +724,23 @@
   }
 
   /** Joint spring on action skeleton (before SCAIL). */
-  async function doJointOvershoot() {
+  async function doJointOvershoot(apply = true) {
     if (!runId) throw "No session.";
     if (!actionSkelReady) throw "Run action skeleton first.";
     setBadge(badgeAction, "running", "running");
     const fd = new FormData();
     fd.append("run_id", runId);
+    fd.append("apply", apply ? "1" : "0");
+    if (jointOmega) fd.append("joint_omega", jointOmega.value);
+    if (jointZeta) fd.append("joint_zeta", jointZeta.value);
+    if (jointSoft) fd.append("joint_soft", jointSoft.value);
     const data = await postForm("/session/joint-overshoot", fd);
-    setBadge(badgeAction, "joint ok", "done");
+    setBadge(badgeAction, apply ? "joint ok" : "done", "done");
     showActionSkel(data);
+    if (vidJointSkel && data.skeleton) {
+      vidJointSkel.src =
+        data.skeleton + (data.skeleton.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+    }
     actionScailReady = false;
     unlockScailSection();
     if (btnScailAction) {
@@ -1108,23 +1137,46 @@
     }
   });
 
-  if (btnJoint) {
-    btnJoint.addEventListener("click", async () => {
+  // -- 5 Joint overshoot (optional standalone step) -----------------------
+  async function runJointCarry(apply) {
+    clearErrors();
+    setBusy(true, apply ? "Applying joint overshoot…" : "Reverting joint overshoot…");
+    try {
+      await doJointOvershoot(apply);
+      statusEl.textContent = apply
+        ? "Joint overshoot applied — carried into SCAIL. Re-run SCAIL2 to update character."
+        : "Joint overshoot removed (plain skeleton). Re-run SCAIL2 to update character.";
+    } catch (e) {
+      if (chkJointCarry) chkJointCarry.checked = !apply; // revert toggle on failure
+      fail(e);
+      setBadge(badgeAction, "error", "");
+      statusEl.textContent = "Joint overshoot toggle failed.";
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (chkJointCarry) {
+    chkJointCarry.addEventListener("change", () => {
       if (!runId || busy) return;
-      clearErrors();
-      setBusy(true, "Joint overshoot on action skeleton…");
-      try {
-        await doJointOvershoot();
-        statusEl.textContent = "Joint overshoot applied to skeleton. Re-run SCAIL2 to update character.";
-      } catch (e) {
-        fail(e);
-        setBadge(badgeAction, "error", "");
-        statusEl.textContent = "Joint overshoot failed.";
-      } finally {
-        setBusy(false);
-      }
+      runJointCarry(chkJointCarry.checked);
     });
   }
+  // Sliders: live label; re-apply on release if the overshoot is currently carried.
+  function wireJointSlider(el, label, fmt) {
+    if (!el) return;
+    const upd = () => {
+      if (label) label.textContent = fmt(el.value);
+    };
+    el.addEventListener("input", upd);
+    el.addEventListener("change", () => {
+      upd();
+      if (chkJointCarry && chkJointCarry.checked && !busy && runId) runJointCarry(true);
+    });
+    upd();
+  }
+  wireJointSlider(jointOmega, jointOmegaLabel, (v) => String(Math.round(Number(v))));
+  wireJointSlider(jointZeta, jointZetaLabel, (v) => Number(v).toFixed(2));
+  wireJointSlider(jointSoft, jointSoftLabel, (v) => Number(v).toFixed(1));
 
   // -- 5 SCAIL2 character (idle / action separate) ------------------------
   // Fill product defaults once (server is source of truth).
@@ -1168,7 +1220,7 @@
       try {
         await doScail("action");
         statusEl.textContent =
-          "SCAIL action done. Next: step 6 bg remove, then optional time overshoot.";
+          "SCAIL action done. Next: step 7 bg remove, then optional time overshoot.";
       } catch (e) {
         fail(e);
         if (badgeScailAction) setBadge(badgeScailAction, "error", "");
