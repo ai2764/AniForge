@@ -505,15 +505,24 @@
     <div class="step-body">
       <div class="controls-col">
         <div>
-          <div class="label-with-info"><label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label></div>
+          <div class="label-with-info">
+            <label for="joint_omega">Spring frequency (omega) <span id="joint_omega_label">20</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About spring frequency">i<span class="info-bubble">Controls how quickly joints react. Higher values feel faster and tighter; very high values can look sharp or jittery.</span></span>
+          </div>
           <input type="range" id="joint_omega" name="joint_omega" min="5" max="40" step="1" value="20">
         </div>
         <div>
-          <div class="label-with-info"><label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label></div>
+          <div class="label-with-info">
+            <label for="joint_zeta">Damping (zeta) <span id="joint_zeta_label">0.35</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About damping">i<span class="info-bubble">Controls how quickly the spring settles. Lower values bounce longer; higher values stop sooner with less overshoot.</span></span>
+          </div>
           <input type="range" id="joint_zeta" name="joint_zeta" min="0.05" max="1" step="0.05" value="0.35">
         </div>
         <div>
-          <div class="label-with-info"><label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label></div>
+          <div class="label-with-info">
+            <label for="joint_soft">Softness (soft) <span id="joint_soft_label">1.0</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About softness">i<span class="info-bubble">Controls the amount of joint follow-through. 0 keeps the original motion; higher values add more lag and spring.</span></span>
+          </div>
           <input type="range" id="joint_soft" name="joint_soft" min="0" max="2" step="0.1" value="1">
         </div>
         <button type="button" id="btn-joint-preview" disabled>Preview overshoot</button>
@@ -667,6 +676,20 @@
           <label for="time-video">Import video (optional)</label>
           <input type="file" id="time-video" accept="video/*,.mp4,.webm,.mov,.avi,.mkv,.m4v">
           <p class="pose-hint" id="time-video-name">No file chosen — will use session action_nobg / action.mp4 if present.</p>
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="time_b">Overshoot strength <span id="time_b_label">0.42</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About overshoot strength">i<span class="info-bubble">Controls how far playback springs past its target before returning. 0 removes the bounce; higher values create a stronger reversal.</span></span>
+          </div>
+          <input type="range" id="time_b" name="time_b" min="0" max="0.7" step="0.01" value="0.42">
+        </div>
+        <div>
+          <div class="label-with-info">
+            <label for="time_t">Settle duration <span id="time_t_label">1.15s</span></label>
+            <span class="info-tip" tabindex="0" role="img" aria-label="About settle duration">i<span class="info-bubble">Controls how long the spring timing lasts at the start of the clip. It does not change the total video duration.</span></span>
+          </div>
+          <input type="range" id="time_t" name="time_t" min="0.5" max="1.8" step="0.05" value="1.15">
         </div>
         <p class="pose-hint">Time overshoot toggle lives on the Run all tab (same control). This button always runs remap.</p>
         <button type="button" id="btn-time">Apply time overshoot</button>

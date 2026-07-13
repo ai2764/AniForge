@@ -472,11 +472,21 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "upload a video or create a session first"},
                 )
                 return
+
+            def _optfloat(name):
+                raw = form.getvalue(name, "")
+                try:
+                    return float(raw) if str(raw).strip() != "" else None
+                except (TypeError, ValueError):
+                    return None
+
             result = stage_time_overshoot(
                 run_id,
                 runs_dir=RUNS_DIR,
                 upload_bytes=upload_bytes,
                 upload_filename=upload_filename,
+                overshoot_b=_optfloat("time_b"),
+                overshoot_t=_optfloat("time_t"),
             )
             # Success if any timed/action artifact exists; soft warnings stay in payload.
             has_out = any(

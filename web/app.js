@@ -22,6 +22,10 @@
   const jointOmegaLabel = document.getElementById("joint_omega_label");
   const jointZetaLabel = document.getElementById("joint_zeta_label");
   const jointSoftLabel = document.getElementById("joint_soft_label");
+  const timeB = document.getElementById("time_b");
+  const timeT = document.getElementById("time_t");
+  const timeBLabel = document.getElementById("time_b_label");
+  const timeTLabel = document.getElementById("time_t_label");
   const btnJointPreview = document.getElementById("btn-joint-preview");
   const vidJointBefore = document.getElementById("vid-joint-before");
   const vidJointAfter = document.getElementById("vid-joint-after");
@@ -967,6 +971,8 @@
       fd.append("run_id", runId);
     }
     if (hasFile) fd.append("video", timeVideoInput.files[0]);
+    if (timeB) fd.append("time_b", timeB.value);
+    if (timeT) fd.append("time_t", timeT.value);
     let data;
     try {
       data = await postForm("/session/time-overshoot", fd);
@@ -976,6 +982,8 @@
       if (hasFile && /invalid run_id/i.test(msg)) {
         const fd2 = new FormData();
         fd2.append("video", timeVideoInput.files[0]);
+        if (timeB) fd2.append("time_b", timeB.value);
+        if (timeT) fd2.append("time_t", timeT.value);
         data = await postForm("/session/time-overshoot", fd2);
         runId = data.run_id || null;
       } else {
@@ -1313,6 +1321,15 @@
   wireJointSlider(jointOmega, jointOmegaLabel, (v) => String(Math.round(Number(v))));
   wireJointSlider(jointZeta, jointZetaLabel, (v) => Number(v).toFixed(2));
   wireJointSlider(jointSoft, jointSoftLabel, (v) => Number(v).toFixed(1));
+
+  function wireValueSlider(el, label, fmt) {
+    if (!el) return;
+    const update = () => { if (label) label.textContent = fmt(el.value); };
+    el.addEventListener("input", update);
+    update();
+  }
+  wireValueSlider(timeB, timeBLabel, (v) => Number(v).toFixed(2));
+  wireValueSlider(timeT, timeTLabel, (v) => Number(v).toFixed(2) + "s");
 
   // -- 5 SCAIL2 character (idle / action separate) ------------------------
   // Fill product defaults once (server is source of truth).

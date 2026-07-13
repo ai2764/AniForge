@@ -894,6 +894,8 @@ def stage_time_overshoot(
     runs_dir: Path = RUNS_DIR,
     upload_bytes: bytes | None = None,
     upload_filename: str = "upload.mp4",
+    overshoot_b: float | None = None,
+    overshoot_t: float | None = None,
 ) -> dict:
     """Time-space spring remap on final action character video only.
 
@@ -906,6 +908,12 @@ def stage_time_overshoot(
     only an upload is provided (standalone time overshoot).
     """
     import shutil
+
+    spring = dict(TIME_SPRING)
+    if overshoot_b is not None:
+        spring["b"] = max(0.0, min(0.7, float(overshoot_b)))
+    if overshoot_t is not None:
+        spring["t"] = max(0.5, min(1.8, float(overshoot_t)))
 
     runs_dir = Path(runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -998,7 +1006,7 @@ def stage_time_overshoot(
             timed,
             out_webm=timed_webm,
             prefer_alpha=True,
-            **TIME_SPRING,
+            **spring,
         )
         # Backup original SCAIL (with bg) once when remapping session action.
         raw_backup = run_dir / "action_scail.mp4"
@@ -1061,6 +1069,8 @@ def stage_time_overshoot(
         }
 
     meta["time_overshoot"] = True
+    meta["time_overshoot_b"] = spring["b"]
+    meta["time_overshoot_t"] = spring["t"]
     meta["time_overshoot_source"] = out.get("time_source")
     meta["time_overshoot_has_alpha"] = bool(out.get("has_alpha"))
     meta["step"] = "time_overshoot"

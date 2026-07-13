@@ -44,3 +44,16 @@ def test_bgremove_model_control_is_hidden_with_default_preserved():
     assert '<div id="bgremove-model-control" hidden>' in html
     assert '<select id="bgremove_model"' in html
     assert '<option value="RMBG-2.0 HQ" selected>' in html
+
+
+def test_overshoot_sliders_have_inline_help_and_time_defaults():
+    root = Path(__file__).parents[1]
+    html = (root / "web" / "index.html").read_text(encoding="utf-8")
+    app = (root / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="time_b"' in html and 'value="0.42"' in html
+    assert 'id="time_t"' in html and 'value="1.15"' in html
+    assert html.count('class="label-with-info"') >= 5
+    assert html.count('class="info-tip"') >= 5
+    assert 'fd.append("time_b", timeB.value)' in app
+    assert 'fd.append("time_t", timeT.value)' in app
