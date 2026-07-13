@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/readme-assets/icon.png" alt="AniForge" width="720">
+</p>
+
 # AniForge
 
 **Bring Any Character to Life**
@@ -28,10 +32,11 @@ Frames: idle @ **0.5s**, action @ **0.7s** (puppy-paw pose peak).
 
 ```text
 Quickly raises both hands to chest height in a cute puppy-paw pose,
-elbows bent and wrists relaxed downward. Mouth closed and still the
-entire time, lips sealed, silent, no talking, no speaking, no lip
-movement, no chewing.
+elbows bent and wrists relaxed downward.
 ```
+
+Kimodo receives only the body-motion description. Mouth and face stability are
+handled later by the SCAIL video prompt.
 
 ---
 
@@ -64,6 +69,10 @@ Kimodo idle motion + breath shaping; arms/legs locked.
 ### 3 · Action skeleton
 
 Kimodo action (+ optional joint overshoot). Frame at **0.7s** (puppy-paw peak).
+
+Joint overshoot exposes **frequency** (`omega`, default `20`), **damping**
+(`zeta`, default `0.35`), and **softness** (`soft`, default `1.0`). Hover or
+focus each `i` icon in the UI for a short explanation.
 
 ![action skeleton](docs/readme-assets/thumbs/04_action_skel.png)
 
@@ -98,6 +107,10 @@ Default **RMBG-2.0 HQ**. Browser preview uses neutral gray; CapCut uses ProRes a
 ### 7 · Time overshoot
 
 Playback spring on the action (alpha preserved in webm; H.264 preview on gray).
+
+The UI exposes **Overshoot strength** (`b`, `0–0.7`, default `0.42`) and
+**Settle duration** (`t`, `0.5–1.8s`, default `1.15s`). Run all uses the same
+controls and defaults.
 
 ![action timed](docs/readme-assets/thumbs/09_action_timed.png)
 
