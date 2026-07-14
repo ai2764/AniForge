@@ -16,6 +16,8 @@ pipeline/seated/runs/
 .comfy/
 
 # Scratch / local junk
+.worktrees/
+.superpowers/sdd/
 _tmp*
 _server_*.log
 body.txt

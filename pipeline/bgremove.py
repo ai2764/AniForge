@@ -21,6 +21,102 @@ BG_MODELS = (
 )
 
 
+def select_bgremove_backend() -> str:
+    backend = os.environ.get("ANIFORGE_BGREMOVE_BACKEND", "native").strip().lower()
+    if backend not in ("native", "external"):
+        raise ValueError(
+            "ANIFORGE_BGREMOVE_BACKEND must be 'native' or 'external', "
+            f"got {backend!r}"
+        )
+    return backend
+
+
+def native_worker_path() -> Path:
+    return Path(__file__).resolve().parent / "bgremove_native" / "worker.py"
+
+
+def _build_native_worker_cmd(
+    input_video: Path,
+    output_dir: Path,
+    *,
+    model: str,
+    formats: str,
+    bg_image: Path | None,
+    fp16: bool,
+    infer_size: int,
+    alpha_shrink: int,
+    alpha_feather: int,
+) -> list[str]:
+    worker = native_worker_path()
+    if not worker.is_file():
+        raise FileNotFoundError(f"missing native bgremove worker: {worker}")
+    cmd = [
+        comfy_python(),
+        str(worker),
+        str(Path(input_video).resolve()),
+        str(Path(output_dir).resolve()),
+        model,
+        formats,
+    ]
+    cmd.append("--fp16" if fp16 else "--no-fp16")
+    if infer_size and int(infer_size) > 0:
+        cmd.extend(["--infer-size", str(int(infer_size))])
+    if alpha_shrink:
+        cmd.extend(["--alpha-shrink", str(int(alpha_shrink))])
+    if alpha_feather:
+        cmd.extend(["--alpha-feather", str(int(alpha_feather))])
+    if bg_image is not None:
+        cmd.extend(["--bg", str(Path(bg_image).resolve())])
+    return cmd
+
+
+def _run_worker_command(
+    cmd: list[str], cwd: Path, env: dict[str, str]
+) -> tuple[int, str]:
+    returncode, stdout, stderr = _run_worker_command_streams(cmd, cwd, env)
+    log = (stdout or "") + ("\n" + stderr if stderr else "")
+    return returncode, log
+
+
+def _run_worker_command_streams(
+    cmd: list[str], cwd: Path, env: dict[str, str]
+) -> tuple[int, str, str]:
+    result = subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+def _parse_worker_results(stdout: str, output_dir: Path, input_video: Path) -> dict:
+    preview = None
+    outputs: list[Path] = []
+    for line in (stdout or "").splitlines():
+        if line.startswith("RESULT:preview:"):
+            preview = Path(line.split(":", 2)[2].strip())
+        elif line.startswith("RESULT:output:"):
+            outputs.append(Path(line.split(":", 2)[2].strip()))
+
+    output_dir = Path(output_dir)
+    input_video = Path(input_video)
+    if preview is None:
+        candidate = output_dir / "preview.mp4"
+        if candidate.is_file():
+            preview = candidate
+    if not outputs:
+        stem = input_video.stem
+        for ext in (".webm", ".mp4", ".mov", ".webp"):
+            candidate = output_dir / f"{stem}{ext}"
+            if candidate.is_file():
+                outputs.append(candidate)
+    return {"preview": preview, "outputs": outputs, "log": stdout or ""}
+
+
 def resolve_vbg_root(root: Path | None = None) -> Path:
     if root is not None:
         p = Path(root)
@@ -61,11 +157,6 @@ def run_bgremove(
 
     Returns dict with keys: preview (mp4 path|None), outputs (list[Path]), log (str).
     """
-    root = resolve_vbg_root(vbg_root)
-    worker = root / "worker.py"
-    if not worker.is_file():
-        raise FileNotFoundError(f"missing worker.py in {root}")
-
     if model not in BG_MODELS:
         raise ValueError(f"unknown model {model!r}; choose from {BG_MODELS}")
 
@@ -76,27 +167,45 @@ def run_bgremove(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    py = resolve_vbg_python(root)
-    cmd = [
-        py,
-        str(worker),
-        str(input_video.resolve()),
-        str(output_dir.resolve()),
-        model,
-        formats,
-    ]
-    if fp16:
-        cmd.append("--fp16")
+    backend = select_bgremove_backend()
+    root = None
+    if backend == "native":
+        cmd = _build_native_worker_cmd(
+            input_video,
+            output_dir,
+            model=model,
+            formats=formats,
+            bg_image=bg_image,
+            fp16=fp16,
+            infer_size=infer_size,
+            alpha_shrink=alpha_shrink,
+            alpha_feather=alpha_feather,
+        )
+        cwd = Path(__file__).resolve().parent.parent
     else:
-        cmd.append("--no-fp16")
-    if infer_size and int(infer_size) > 0:
-        cmd.extend(["--infer-size", str(int(infer_size))])
-    if alpha_shrink:
-        cmd.extend(["--alpha-shrink", str(int(alpha_shrink))])
-    if alpha_feather:
-        cmd.extend(["--alpha-feather", str(int(alpha_feather))])
-    if bg_image is not None:
-        cmd.extend(["--bg", str(Path(bg_image).resolve())])
+        root = resolve_vbg_root(vbg_root)
+        worker = root / "worker.py"
+        if not worker.is_file():
+            raise FileNotFoundError(f"missing worker.py in {root}")
+        py = resolve_vbg_python(root)
+        cmd = [
+            py,
+            str(worker),
+            str(input_video.resolve()),
+            str(output_dir.resolve()),
+            model,
+            formats,
+        ]
+        cmd.append("--fp16" if fp16 else "--no-fp16")
+        if infer_size and int(infer_size) > 0:
+            cmd.extend(["--infer-size", str(int(infer_size))])
+        if alpha_shrink:
+            cmd.extend(["--alpha-shrink", str(int(alpha_shrink))])
+        if alpha_feather:
+            cmd.extend(["--alpha-feather", str(int(alpha_feather))])
+        if bg_image is not None:
+            cmd.extend(["--bg", str(Path(bg_image).resolve())])
+        cwd = root
 
     env = {
         **os.environ,
@@ -104,47 +213,21 @@ def run_bgremove(
         "KMP_DUPLICATE_LIB_OK": "TRUE",
     }
     # Prefer portable ffmpeg from videoBGremoval
-    portable_ff = root / "portable" / "ffmpeg" / "bin" / "ffmpeg.exe"
-    if portable_ff.is_file():
+    portable_ff = root / "portable" / "ffmpeg" / "bin" / "ffmpeg.exe" if root else None
+    if portable_ff and portable_ff.is_file():
         env["FFMPEG_PATH"] = str(portable_ff)
 
     print(f"[bgremove] {' '.join(cmd)}", flush=True)
-    r = subprocess.run(
-        cmd,
-        cwd=str(root),
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    log = (r.stdout or "") + ("\n" + r.stderr if r.stderr else "")
-    if r.returncode != 0:
+    returncode, stdout, stderr = _run_worker_command_streams(cmd, cwd, env)
+    log = stdout + ("\n" + stderr if stderr else "")
+    if returncode != 0:
         raise RuntimeError(
-            f"videoBGremoval worker failed (exit {r.returncode}):\n{log[-2000:]}"
+            f"background removal worker failed (exit {returncode}):\n{log[-2000:]}"
         )
 
-    preview = None
-    outputs: list[Path] = []
-    for line in (r.stdout or "").splitlines():
-        if line.startswith("RESULT:preview:"):
-            preview = Path(line.split(":", 2)[2].strip())
-        elif line.startswith("RESULT:output:"):
-            outputs.append(Path(line.split(":", 2)[2].strip()))
-
-    # Fallbacks if RESULT lines missing
-    if preview is None:
-        p = output_dir / "preview.mp4"
-        if p.is_file():
-            preview = p
-    if not outputs:
-        stem = input_video.stem
-        for ext in (".webm", ".mp4", ".mov", ".webp"):
-            cand = output_dir / f"{stem}{ext}"
-            if cand.is_file():
-                outputs.append(cand)
-
-    return {"preview": preview, "outputs": outputs, "log": log}
+    parsed = _parse_worker_results(stdout, output_dir, input_video)
+    parsed["log"] = log
+    return parsed
 
 
 def resolve_ffmpeg(vbg_root: Path | None = None) -> str:
