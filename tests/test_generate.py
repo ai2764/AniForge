@@ -65,6 +65,10 @@ def test_scail_prompts_finished_video_style():
     assert "reference" in idle and "mouth closed" in idle
     assert "reference" in action and "mouth closed" in action
     assert "replace" not in idle and "swap" not in action
+    assert "stands" not in idle and "frontal camera" not in idle
+    assert "feet stay still and planted" not in idle
+    assert "same pose" in idle and "camera angle" in idle
+    assert "prop" in idle and "support surface" in idle
     # Action builder embeds concrete motion into a finished-video paragraph.
     built = build_scail_positive(
         "action",

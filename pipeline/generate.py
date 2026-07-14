@@ -63,16 +63,15 @@ SCAIL_MOUTH_LOCK = ""  # legacy name; unused
 
 # ~90–120 word English paragraphs (official enhancer targets ~90–140 for replace).
 SCAIL_IDLE_POSITIVE = (
-    "A full-body character matching the reference image stands facing a fixed "
-    "frontal camera under soft even lighting, with clothing, hairstyle, colors, "
-    "and proportions held consistent across every frame. The character keeps the "
-    "same overall posture in a calm seamless idle loop: soft continuous chest and "
-    "torso breathing with a gentle spine sway, a slight head nod and sway, and "
-    "shoulders easing with the breath. Arms, "
-    "hands, hips, and feet stay still and planted with no waving, gesturing, "
-    "walking, dancing, or large joint rotations. The face remains calm and still, "
-    "mouth closed, lips sealed, silent, with no talking, lip motion, or expression "
-    "change. Identity and wardrobe stay locked to the reference throughout."
+    "A character matching the reference image remains in exactly the same pose, "
+    "framing, scale, camera angle, and position relative to every visible prop and "
+    "support surface. The character performs a calm seamless idle loop with only "
+    "subtle chest breathing, a gentle torso sway, a slight head nod, and small "
+    "shoulder movement. Arms, hands, hips, legs, and feet remain in their original "
+    "positions. All props, furniture, clothing, hairstyle, body proportions, "
+    "background, and composition remain unchanged throughout. The face stays calm "
+    "and still, with the mouth closed and no lip movement. Identity and image "
+    "details remain consistent across every frame."
 )
 
 SCAIL_ACTION_POSITIVE = (

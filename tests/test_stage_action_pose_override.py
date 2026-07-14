@@ -5,7 +5,7 @@ import numpy as np
 from pipeline import stages
 
 
-def test_stage_action_pose_override_does_not_change_session_pose(tmp_path, monkeypatch):
+def test_stage_action_pose_selection_becomes_the_run_pose(tmp_path, monkeypatch):
     run_id = "run1"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
@@ -18,6 +18,7 @@ def test_stage_action_pose_override_does_not_change_session_pose(tmp_path, monke
                 "seed": 123,
                 "size": [512, 768],
                 "extracted": True,
+                "idle_done": True,
             }
         ),
         encoding="utf-8",
@@ -51,5 +52,6 @@ def test_stage_action_pose_override_does_not_change_session_pose(tmp_path, monke
     assert result["action_lock_lower"] is True
 
     meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
-    assert meta["pose_mode"] == "standing"
-    assert meta["action_pose_mode"] == "lying"
+    assert meta["pose_mode"] == "lying"
+    assert "action_pose_mode" not in meta
+    assert meta["idle_done"] is True

@@ -615,7 +615,10 @@ def stage_action(
     meta["action_done"] = True
     meta["step"] = "action_skel"
     meta["action_prompt"] = action_text
-    meta["action_pose_mode"] = action_pose_mode
+    # Step-by-step chooses the run pose at Action time; Run All already set the
+    # same field at session creation. Keep one pose mode for all later stages.
+    meta["pose_mode"] = action_pose_mode
+    meta.pop("action_pose_mode", None)
     meta["action_preserve_lower_pose"] = action_pose_mode == "standing" and lower_pose
     meta["action_close_lower_pose"] = action_pose_mode == "standing" and close_lower_pose
     meta["action_motion_keep"] = keep

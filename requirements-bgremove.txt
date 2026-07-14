@@ -1,0 +1,7 @@
+# Install CUDA-enabled torch and torchvision separately for the target GPU first.
+transformers
+kornia
+huggingface_hub
+opencv-python
+numpy
+Pillow

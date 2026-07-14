@@ -150,7 +150,8 @@ Full-res frames also live under [`docs/readme-assets/`](docs/readme-assets/) (RE
 1. **ComfyUI-scail** with Kimodo (SOMA) + SCAIL2 (`WanSCAILToVideo`), default URL `http://127.0.0.1:8188`
 2. **ffmpeg** on PATH
 3. **Python 3.10–3.12**
-4. Optional: **videoBGremoval** sibling folder
+4. For the default native background-removal backend: a CUDA-capable Python with CUDA builds of **PyTorch** and **torchvision**
+5. Optional legacy comparison backend: **videoBGremoval** sibling folder
 
 ### Configure paths
 
@@ -161,11 +162,13 @@ cp .env.example .env
 | Variable | Purpose |
 |----------|---------|
 | `COMFYUI_SCAIL_ROOT` | ComfyUI root (`input/`, `output/`, `custom_nodes/`) |
-| `VIDEO_BG_REMOVAL_ROOT` | videoBGremoval repo |
-| `COMFY_PYTHON` | Optional Python with torch for subprocesses |
+| `ANIFORGE_BGREMOVE_BACKEND` | `native` by default; set `external` only to compare with legacy videoBGremoval |
+| `VIDEO_BG_REMOVAL_ROOT` | Optional legacy videoBGremoval repo path |
+| `RMBG_MODEL_DIR` | Optional local RMBG-2.0 model directory |
+| `COMFY_PYTHON` | Python executable used by native matting subprocesses; point this at the CUDA PyTorch environment |
 | `STANDEE_DIR` | Optional standee image folder for batch tools |
 
-If unset, AniForge looks for `../ComfyUI-scail` / `../videoBGremoval`, else `./.comfy/…`.
+If `COMFYUI_SCAIL_ROOT` is unset, AniForge looks for `../ComfyUI-scail`, else `./.comfy/…`. The `../videoBGremoval` sibling path is used only when `ANIFORGE_BGREMOVE_BACKEND=external` and `VIDEO_BG_REMOVAL_ROOT` is unset.
 
 ### Install & run
 
@@ -173,6 +176,16 @@ If unset, AniForge looks for `../ComfyUI-scail` / `../videoBGremoval`, else `./.
 pip install -r requirements.txt
 python server/app.py
 ```
+
+### Native background removal dependencies
+
+`ANIFORGE_BGREMOVE_BACKEND=native` is the default and runs in `COMFY_PYTHON` when it is set. Install the CUDA-enabled `torch` and `torchvision` builds matching the target GPU and CUDA runtime using the [official PyTorch selector](https://pytorch.org/get-started/locally/); do not install a CPU-only torch build for this backend. Then install the native non-torch dependencies into that same interpreter:
+
+```bash
+<path-to-cuda-python> -m pip install -r requirements-bgremove.txt
+```
+
+Set `COMFY_PYTHON` in `.env` to `<path-to-cuda-python>`. A ComfyUI Python environment is suitable when it has compatible CUDA PyTorch, `torchvision`, and the packages in `requirements-bgremove.txt` installed. The native backend also downloads RMBG-2.0 from Hugging Face unless `RMBG_MODEL_DIR` points to a local model directory.
 
 Open **http://127.0.0.1:8500**
 

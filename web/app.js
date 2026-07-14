@@ -799,6 +799,7 @@
     fd.append("action_motion_keep", String(actionMotionKeepValue()));
     fd.append("action_duration", String(actionDurationValue()));
     const data = await postForm("/session/action", fd);
+    if (data.pose_mode) syncPoseFromServer(data.pose_mode);
     setBadge(badgeAction, "done", "done");
     showActionSkel(data);
     actionSkelReady = true;
